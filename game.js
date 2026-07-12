@@ -1,6 +1,7 @@
 // Pixel Quest Camping Day — main loop and state machine.
 import { W, H, loadAssets, ZONE_RECIPES } from './assets.js';
 import { input, initInput, getMove, takeTap, clearFrameFlags, drawJoystick } from './input.js';
+import { initItems, enterZone, updateEntities, drawEntities } from './entities.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -44,6 +45,8 @@ const game = {
 };
 
 window.pq = game; // debug/testing handle
+window.pqStart = h => startGame(h);
+window.pqState = () => state;
 window.pqDebug = () => ({ state, view: { ...view }, joy: { ...input.joy }, taps: input.taps.length });
 
 const TRANSITION_TIME = 0.45;
@@ -76,8 +79,18 @@ function startGame(hero) {
   game.player.hurtT = 0;
   game.transition = null;
   game.visited = new Set(['1,1']);
+  game.shake = 0;
+  game.flash = 0;
+  initItems(game);
+  enterZone(game);
   showBanner(ZONE_RECIPES['1,1'].name);
   setState('PLAY');
+}
+
+function endGame(won) {
+  game.best = Math.max(game.best, game.score);
+  localStorage.setItem('pq-best', String(game.best));
+  setState(won ? 'WIN' : 'DIED');
 }
 
 // ---------- update ----------
@@ -131,6 +144,20 @@ function updatePlay(dt) {
     p.dir = Math.abs(mv.dx) > Math.abs(mv.dy) ? (mv.dx > 0 ? 'right' : 'left') : (mv.dy > 0 ? 'down' : 'up');
   }
   if (p.hurtT > 0) p.hurtT -= dt;
+  if (game.shake > 0) game.shake -= dt;
+  if (game.flash > 0) game.flash -= dt;
+
+  updateEntities(game, dt, {
+    onPickup: () => {
+      if (game.score >= 15) endGame(true);
+    },
+    onHurt: () => {
+      game.shake = 0.3;
+      game.flash = 0.25;
+      if (game.hearts <= 0) endGame(false);
+    },
+  });
+  if (state !== 'PLAY') return;
 
   // walk off an edge -> slide to the neighboring zone (if there is one)
   if (p.x < PLAYER_RADIUS && game.zone.x > 0) return startTransition(-1, 0);
@@ -144,6 +171,7 @@ function updatePlay(dt) {
 function onZoneEnter() {
   game.visited.add(zoneKey());
   showBanner(ZONE_RECIPES[zoneKey()].name);
+  enterZone(game);
 }
 
 // ---------- draw ----------
@@ -190,8 +218,16 @@ function drawPlay(t) {
     ctx.drawImage(assets.zones[zoneKey()], -tr.dx * e * W, -tr.dy * e * H);
     ctx.drawImage(assets.zones[nx + ',' + ny], tr.dx * W - tr.dx * e * W, tr.dy * H - tr.dy * e * H);
   } else {
+    if (game.shake > 0) {
+      ctx.translate((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 14);
+    }
     ctx.drawImage(assets.zones[zoneKey()], 0, 0);
+    drawEntities(ctx, assets, game, t);
     drawPlayer(t);
+    if (game.flash > 0) {
+      ctx.fillStyle = 'rgba(232,48,42,' + (game.flash * 1.2) + ')';
+      ctx.fillRect(-20, -20, W + 40, H + 40);
+    }
   }
   drawHud();
   drawBanner();
@@ -306,6 +342,11 @@ let last = 0;
 function loop(t) {
   const dt = Math.min(0.05, (t - last) / 1000 || 0.016);
   last = t;
+  // some embedded/mobile browsers settle the viewport without firing resize
+  if (canvas.width !== Math.round(innerWidth * Math.min(devicePixelRatio || 1, 3)) ||
+      canvas.height !== Math.round(innerHeight * Math.min(devicePixelRatio || 1, 3))) {
+    resize();
+  }
   update(dt);
   draw(t);
   requestAnimationFrame(loop);
