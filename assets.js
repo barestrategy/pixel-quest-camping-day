@@ -27,19 +27,69 @@ const HERO_DIR_NAMES = [
   'emily-up', 'emily-down', 'emily-left', 'emily-right',
 ];
 
-// How each of the 9 zones is built from the kids' two backdrops.
-// hue in degrees, bright/sat as multipliers; mirror flips horizontally.
-export const ZONE_RECIPES = {
-  '0,0': { src: 'bg-battlefield', mirror: true,  hue: -20, name: 'Rocky Grove' },
-  '1,0': { src: 'bg-battlefield',                          name: "Queen's Clearing" },
-  '2,0': { src: 'bg-campsite',    mirror: true,  hue: 25,  bright: 0.82, name: 'Deep Woods' },
-  '0,1': { src: 'bg-campsite',    mirror: true,  hue: 12,  name: 'Willow Bend' },
-  '1,1': { src: 'bg-campsite',                             name: 'The Campsite' },
-  '2,1': { src: 'bg-campsite',                   hue: -25, bright: 1.08, name: 'Sunny Meadow' },
-  '0,2': { src: 'bg-battlefield',                hue: 35,  bright: 0.85, name: 'Mossy Hollow' },
-  '1,2': { src: 'bg-campsite',    mirror: true,  hue: -45, sat: 1.1, name: 'Fern Trail' },
-  '2,2': { src: 'bg-battlefield', mirror: true,  hue: 15,  bright: 0.8, name: 'Shadow Pines' },
+// Props cropped straight out of the kids' two paintings: [source, x, y, w, h].
+const PROP_RECTS = {
+  'cave-dark':     ['bg-campsite', 115, 96, 125, 112],
+  'well':          ['bg-campsite', 443, 315, 100, 75],
+  'chest':         ['bg-campsite', 582, 352, 44, 40],
+  'bridge':        ['bg-campsite', 612, 418, 92, 50],
+  'pine-big':      ['bg-campsite', 178, 300, 85, 158],
+  'sign-arrow':    ['bg-campsite', 283, 110, 44, 44],
+  'sign-post':     ['bg-campsite', 835, 243, 40, 44],
+  'cave-stone':    ['bg-battlefield', 128, 92, 232, 215],
+  'pond':          ['bg-battlefield', 482, 176, 230, 162],
+  'obelisk':       ['bg-battlefield', 714, 282, 86, 176],
+  'lantern':       ['bg-battlefield', 692, 452, 58, 60],
+  'bridge2':       ['bg-battlefield', 806, 58, 112, 65],
+  'pine':          ['bg-battlefield', 362, 58, 66, 140],
+  'tree1':         ['bg-battlefield', 830, 325, 70, 70],
+  'tree2':         ['bg-battlefield', 697, 66, 68, 66],
+  'tree3':         ['bg-battlefield', 50, 298, 68, 65],
+  'rock1':         ['bg-battlefield', 253, 36, 50, 42],
+  'rock2':         ['bg-battlefield', 855, 533, 56, 50],
+  'rock3':         ['bg-battlefield', 60, 573, 55, 48],
+  'mushroom1':     ['bg-battlefield', 213, 310, 30, 30],
+  'mushroom2':     ['bg-battlefield', 112, 398, 44, 42],
+  'sign-go':       ['bg-battlefield', 359, 197, 55, 50],
+  'sign-motivate': ['bg-battlefield', 609, 402, 90, 50],
+  'stone1':        ['bg-battlefield', 650, 510, 52, 32],
+  'stone2':        ['bg-battlefield', 570, 576, 50, 34],
+  'flower1':       ['bg-battlefield', 812, 373, 32, 30],
+  'flower2':       ['bg-battlefield', 685, 648, 36, 40],
+  'sparkle':       ['bg-battlefield', 850, 608, 34, 36],
+  'grass1':        ['bg-battlefield', 386, 340, 100, 100],
+  'grass2':        ['bg-campsite', 84, 232, 128, 128],
 };
+
+// Tiles keep their full rectangle; bridges only lose their corners (they sit on
+// drawn water that covers their edge midpoints).
+const NO_MASK = new Set(['grass1', 'grass2']);
+const CORNER_MASK = new Set(['bridge', 'bridge2']);
+
+function cropProp(imgs, [src, x, y, w, h], mode) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(imgs[src], x, y, w, h, 0, 0, w, h);
+  if (mode === 'none') return c;
+  // elliptical vignette: the crop's grass corners fade out so props sit on any
+  // ground without showing their source rectangle
+  const d = ctx.getImageData(0, 0, w, h);
+  const rx = w / 2, ry = h / 2;
+  const [start, span] = mode === 'corners' ? [1.0, 0.55] : [0.72, 0.28];
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      const nx = (px - rx + 0.5) / rx, ny = (py - ry + 0.5) / ry;
+      const e = nx * nx + ny * ny; // 1.0 at the ellipse edge
+      if (e > start) {
+        const a = Math.max(0, 1 - (e - start) / span);
+        d.data[(py * w + px) * 4 + 3] *= a * a;
+      }
+    }
+  }
+  ctx.putImageData(d, 0, 0);
+  return c;
+}
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
@@ -77,7 +127,7 @@ function trim(img) {
 
 // CSS-filter-spec hue-rotate matrix + brightness/saturate, applied per pixel.
 // Done manually because iOS Safari lacks CanvasRenderingContext2D.filter.
-function applyColorFilter(canvas, { hue = 0, bright = 1, sat = 1 }) {
+export function applyColorFilter(canvas, { hue = 0, bright = 1, sat = 1 }) {
   if (!hue && bright === 1 && sat === 1) return canvas;
   const ctx = canvas.getContext('2d');
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -113,24 +163,6 @@ function applyColorFilter(canvas, { hue = 0, bright = 1, sat = 1 }) {
   return canvas;
 }
 
-// Cover-draw: fill the whole W x H canvas, cropping source overflow.
-function buildZone(imgs, recipe) {
-  const c = document.createElement('canvas');
-  c.width = W; c.height = H;
-  const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  const img = imgs[recipe.src];
-  const s = Math.max(W / img.naturalWidth, H / img.naturalHeight);
-  const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
-  if (recipe.mirror) {
-    ctx.translate(W, 0);
-    ctx.scale(-1, 1);
-  }
-  ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  return applyColorFilter(c, recipe);
-}
-
 // Two-frame walk cycle: legs (bottom ~28%) split into halves that lift alternately.
 function makeWalkFrames(spr) {
   const legY = Math.round(spr.height * 0.72);
@@ -158,8 +190,11 @@ function sampleColor(img) {
   return `rgb(${d[0]},${d[1]},${d[2]})`;
 }
 
-export function rebuildZones(assets) {
-  for (const [key, recipe] of Object.entries(ZONE_RECIPES)) assets.zones[key] = buildZone(assets.imgs, recipe);
+function cloneCanvas(c) {
+  const out = document.createElement('canvas');
+  out.width = c.width; out.height = c.height;
+  out.getContext('2d').drawImage(c, 0, 0);
+  return out;
 }
 
 export async function loadAssets() {
@@ -174,7 +209,17 @@ export async function loadAssets() {
     'screen-win': sampleColor(imgs['screen-win']),
     'screen-died': sampleColor(imgs['screen-died']),
   };
-  const assets = { imgs, sprites, walk, menuBg, zones: {} };
-  rebuildZones(assets);
-  return assets;
+  const props = {};
+  for (const [name, rect] of Object.entries(PROP_RECTS)) {
+    props[name] = cropProp(imgs, rect, NO_MASK.has(name) ? 'none' : CORNER_MASK.has(name) ? 'corners' : 'ellipse');
+  }
+  // mood variants for the themed zones
+  for (const n of ['tree1', 'tree2', 'tree3', 'pine', 'pine-big']) {
+    props[n + '-dark'] = applyColorFilter(cloneCanvas(props[n]), { bright: 0.68 });
+    props[n + '-autumn'] = applyColorFilter(cloneCanvas(props[n]), { hue: -45, sat: 1.15 });
+  }
+  props['grass1-dark'] = applyColorFilter(cloneCanvas(props['grass1']), { bright: 0.78 });
+  props['grass1-sunny'] = applyColorFilter(cloneCanvas(props['grass1']), { hue: -10, bright: 1.12 });
+  props['grass2-autumn'] = applyColorFilter(cloneCanvas(props['grass2']), { hue: -30, sat: 1.05 });
+  return { imgs, sprites, walk, menuBg, props };
 }

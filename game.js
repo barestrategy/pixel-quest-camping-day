@@ -1,8 +1,16 @@
 // Pixel Quest Camping Day — main loop and state machine.
-import { W, H, setWorldWidth, rebuildZones, loadAssets, ZONE_RECIPES } from './assets.js';
+import { W, H, setWorldWidth, loadAssets } from './assets.js';
 import { input, initInput, getMove, takeTap, clearFrameFlags, drawJoystick } from './input.js';
 import { initItems, enterZone, updateEntities, drawEntities } from './entities.js';
+import { ZONE_DEFS, buildZoneLayout, snapshotLayout, moveWithCollision, blockedAt, randomOpenSpot } from './zonegen.js';
 import { unlock, setTheme, sfx, toggleMute, isMuted } from './audio.js';
+
+let layouts = {}; // zone key -> generated layout, rebuilt when the world resizes
+
+function getLayout(key) {
+  if (!layouts[key]) layouts[key] = buildZoneLayout(key, assets);
+  return layouts[key];
+}
 
 const muteBtn = () => ({ x: W - 64, y: H - 64, r: 30 });
 const startBtnRect = () => ({ x: W / 2 - 150, y: H - 165, w: 300, h: 105 });
@@ -26,7 +34,7 @@ function resize() {
     const targetW = Math.max(560, Math.min(1680, Math.round(H * innerWidth / innerHeight)));
     if (Math.abs(targetW - W) / W > 0.05) {
       setWorldWidth(targetW);
-      rebuildZones(assets);
+      layouts = {};
       clampToWorld();
     }
   }
@@ -38,10 +46,14 @@ addEventListener('resize', resize);
 resize();
 
 function clampToWorld() {
-  if (!game.player) return;
+  if (!game.player || state !== 'PLAY') return;
+  const layout = getLayout(zoneKey());
   game.player.x = Math.max(30, Math.min(W - 30, game.player.x));
-  for (const a of game.ants || []) a.x = Math.max(30, Math.min(W - 30, a.x));
-  for (const it of game.items || []) it.x = Math.max(60, Math.min(W - 60, it.x));
+  if (blockedAt(layout, game.player.x, game.player.y, 20)) {
+    const pos = randomOpenSpot(layout);
+    game.player.x = pos.x; game.player.y = pos.y;
+  }
+  enterZone(game, layout); // respawn this zone's ants/items inside the new bounds
 }
 
 // screen (CSS px) -> world coords
@@ -104,8 +116,8 @@ function startGame(hero) {
   game.shake = 0;
   game.flash = 0;
   initItems(game);
-  enterZone(game);
-  showBanner(ZONE_RECIPES['1,1'].name);
+  enterZone(game, getLayout('1,1'));
+  showBanner(ZONE_DEFS['1,1'].name);
   setTheme('camp');
   setState('PLAY');
 }
@@ -180,11 +192,11 @@ function updatePlay(dt) {
     return; // world frozen while sliding
   }
 
+  const layout = getLayout(zoneKey());
   const mv = getMove();
   p.moving = !!(mv.dx || mv.dy);
   if (p.moving) {
-    p.x += mv.dx * PLAYER_SPEED * dt;
-    p.y += mv.dy * PLAYER_SPEED * dt;
+    moveWithCollision(p, mv.dx * PLAYER_SPEED * dt, mv.dy * PLAYER_SPEED * dt, layout, 20);
     // facing follows the dominant axis
     p.dir = Math.abs(mv.dx) > Math.abs(mv.dy) ? (mv.dx > 0 ? 'right' : 'left') : (mv.dy > 0 ? 'down' : 'up');
   }
@@ -215,7 +227,7 @@ function updatePlay(dt) {
       if (game.hearts <= 0) endGame(false);
       else sfx.hurt();
     },
-  });
+  }, layout);
   if (state !== 'PLAY') return;
 
   // walk off an edge -> slide to the neighboring zone (if there is one)
@@ -229,8 +241,8 @@ function updatePlay(dt) {
 
 function onZoneEnter() {
   game.visited.add(zoneKey());
-  showBanner(ZONE_RECIPES[zoneKey()].name);
-  enterZone(game);
+  showBanner(ZONE_DEFS[zoneKey()].name);
+  enterZone(game, getLayout(zoneKey()));
   setTheme(zoneKey() === '1,1' ? 'camp' : 'adventure');
 }
 
@@ -299,15 +311,15 @@ function drawPlay(t) {
     const k = Math.min(1, tr.t / TRANSITION_TIME);
     const e = k * k * (3 - 2 * k); // smoothstep
     const nx = game.zone.x + tr.dx, ny = game.zone.y + tr.dy;
-    ctx.drawImage(assets.zones[zoneKey()], -tr.dx * e * W, -tr.dy * e * H);
-    ctx.drawImage(assets.zones[nx + ',' + ny], tr.dx * W - tr.dx * e * W, tr.dy * H - tr.dy * e * H);
+    ctx.drawImage(snapshotLayout(getLayout(zoneKey())), -tr.dx * e * W, -tr.dy * e * H);
+    ctx.drawImage(snapshotLayout(getLayout(nx + ',' + ny)), tr.dx * W - tr.dx * e * W, tr.dy * H - tr.dy * e * H);
   } else {
     if (game.shake > 0) {
       ctx.translate((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 14);
     }
-    ctx.drawImage(assets.zones[zoneKey()], 0, 0);
-    drawEntities(ctx, assets, game, t);
-    drawPlayer(t);
+    const layout = getLayout(zoneKey());
+    ctx.drawImage(layout.ground, 0, 0);
+    drawEntities(ctx, assets, game, t, layout, () => drawPlayer(t));
     if (game.flash > 0) {
       ctx.fillStyle = 'rgba(232,48,42,' + (game.flash * 1.2) + ')';
       ctx.fillRect(-20, -20, W + 40, H + 40);
