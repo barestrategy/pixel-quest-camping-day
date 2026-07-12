@@ -72,6 +72,8 @@ const game = {
   player: { x: W / 2, y: H / 2 + 60, dir: 'down', moving: false, hurtT: 0 },
   best: Number(localStorage.getItem('pq-best') || 0),
   select: { chosen: null },
+  inCave: false,
+  fade: null,
   banner: { text: '', t: 0 },
   transition: null,       // { dx, dy, t } while sliding between zones
   visited: new Set(['1,1']),
@@ -85,7 +87,13 @@ window.pqDebug = () => ({ state, view: { ...view }, joy: { ...input.joy }, taps:
 const TRANSITION_TIME = 0.45;
 const EDGE = 8;           // how close to the edge triggers a zone change
 
-function zoneKey() { return game.zone.x + ',' + game.zone.y; }
+function zoneKey() { return game.inCave ? 'U' : game.zone.x + ',' + game.zone.y; }
+
+// fade-to-black used for cave entrances/exits; action fires at the midpoint
+function startFade(action) {
+  game.fade = { t: 0, dur: 0.7, action, done: false };
+  sfx.whoosh();
+}
 
 function showBanner(text) {
   game.banner.text = text;
@@ -112,6 +120,8 @@ function startGame(hero) {
   game.player.dir = 'down';
   game.player.hurtT = 0;
   game.transition = null;
+  game.inCave = false;
+  game.fade = null;
   game.visited = new Set(['1,1']);
   game.shake = 0;
   game.flash = 0;
@@ -175,6 +185,14 @@ function updatePlay(dt) {
   const p = game.player;
   if (game.banner.t > 0) game.banner.t -= dt;
 
+  if (game.fade) {
+    const f = game.fade;
+    f.t += dt;
+    if (!f.done && f.t >= f.dur / 2) { f.done = true; f.action(); }
+    if (f.t >= f.dur) game.fade = null;
+    return;
+  }
+
   if (game.transition) {
     const tr = game.transition;
     tr.t += dt;
@@ -230,20 +248,55 @@ function updatePlay(dt) {
   }, layout);
   if (state !== 'PLAY') return;
 
+  // cave doorways lead underground; ladders lead back up
+  if (!game.inCave && layout.caveDoor && rectHas(layout.caveDoor, p.x, p.y)) {
+    const from = zoneKey();
+    return startFade(() => {
+      game.inCave = true;
+      const exit = getLayout('U').exits.find(e => e.to === from) || getLayout('U').exits[0];
+      p.x = exit.rect.x + exit.rect.w / 2;
+      p.y = exit.rect.y + exit.rect.h + 30;
+      onZoneEnter();
+    });
+  }
+  if (game.inCave) {
+    for (const exit of layout.exits) {
+      if (rectHas(exit.rect, p.x, p.y)) {
+        return startFade(() => {
+          game.inCave = false;
+          const [zx, zy] = exit.to.split(',').map(Number);
+          game.zone = { x: zx, y: zy };
+          const door = getLayout(exit.to).caveDoor;
+          p.x = door.x + door.w / 2;
+          p.y = door.y + door.h + 34;
+          onZoneEnter();
+        });
+      }
+    }
+  }
+
   // walk off an edge -> slide to the neighboring zone (if there is one)
-  if (p.x < PLAYER_RADIUS && game.zone.x > 0) return startTransition(-1, 0);
-  if (p.x > W - PLAYER_RADIUS && game.zone.x < 2) return startTransition(1, 0);
-  if (p.y < PLAYER_RADIUS && game.zone.y > 0) return startTransition(0, -1);
-  if (p.y > H - PLAYER_RADIUS && game.zone.y < 2) return startTransition(0, 1);
+  if (!game.inCave) {
+    if (p.x < PLAYER_RADIUS && game.zone.x > 0) return startTransition(-1, 0);
+    if (p.x > W - PLAYER_RADIUS && game.zone.x < 2) return startTransition(1, 0);
+    if (p.y < PLAYER_RADIUS && game.zone.y > 0) return startTransition(0, -1);
+    if (p.y > H - PLAYER_RADIUS && game.zone.y < 2) return startTransition(0, 1);
+  }
   p.x = Math.max(PLAYER_RADIUS, Math.min(W - PLAYER_RADIUS, p.x));
   p.y = Math.max(PLAYER_RADIUS, Math.min(H - PLAYER_RADIUS, p.y));
 }
 
+function rectHas(r, x, y) {
+  return x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h;
+}
+
 function onZoneEnter() {
-  game.visited.add(zoneKey());
-  showBanner(ZONE_DEFS[zoneKey()].name);
-  enterZone(game, getLayout(zoneKey()));
-  setTheme(zoneKey() === '1,1' ? 'camp' : 'adventure');
+  const key = zoneKey();
+  game.visited.add(key);
+  const layout = getLayout(key);
+  showBanner(layout.name);
+  enterZone(game, layout);
+  setTheme(key === 'U' ? 'cave' : key === '1,1' ? 'camp' : 'adventure');
 }
 
 // ---------- draw ----------
@@ -320,6 +373,14 @@ function drawPlay(t) {
     const layout = getLayout(zoneKey());
     ctx.drawImage(layout.ground, 0, 0);
     drawEntities(ctx, assets, game, t, layout, () => drawPlayer(t));
+    if (game.inCave) { // lantern-light darkness around the hero
+      const p = game.player;
+      const g = ctx.createRadialGradient(p.x, p.y, 130, p.x, p.y, 420);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, 'rgba(8,5,2,0.82)');
+      ctx.fillStyle = g;
+      ctx.fillRect(-20, -20, W + 40, H + 40);
+    }
     if (game.flash > 0) {
       ctx.fillStyle = 'rgba(232,48,42,' + (game.flash * 1.2) + ')';
       ctx.fillRect(-20, -20, W + 40, H + 40);
@@ -327,6 +388,12 @@ function drawPlay(t) {
   }
   drawHud();
   drawBanner();
+  if (game.fade) {
+    const f = game.fade;
+    const a = 1 - Math.abs(1 - 2 * (f.t / f.dur)); // 0 -> 1 -> 0
+    ctx.fillStyle = 'rgba(0,0,0,' + Math.min(1, a * 1.25) + ')';
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+  }
 }
 
 function drawBanner() {
@@ -334,7 +401,7 @@ function drawBanner() {
   const a = Math.min(1, game.banner.t / 0.5); // fade out over the last half second
   ctx.save();
   ctx.globalAlpha = a;
-  drawCenterText(game.banner.text, W / 2, 100, 40, '#ffe9a8');
+  drawCenterText(game.banner.text, W / 2, 152, 40, '#ffe9a8');
   ctx.restore();
 }
 
@@ -347,10 +414,15 @@ function drawMinimap() {
   for (let zy = 0; zy < 3; zy++) {
     for (let zx = 0; zx < 3; zx++) {
       const key = zx + ',' + zy;
-      const cur = zx === game.zone.x && zy === game.zone.y;
+      const cur = !game.inCave && zx === game.zone.x && zy === game.zone.y;
       ctx.fillStyle = cur ? '#ffe14d' : game.visited.has(key) ? 'rgba(180,230,140,0.9)' : 'rgba(255,255,255,0.25)';
       ctx.fillRect(x0 + pad + zx * (cell + gap), y0 + pad + zy * (cell + gap), cell, cell);
     }
+  }
+  if (game.inCave) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x0, y0 + mw + 4, mw, 22);
+    drawCenterText('CAVE', x0 + mw / 2, y0 + mw + 21, 16, '#8adfff');
   }
 }
 

@@ -25,6 +25,13 @@ const THEMES = {
     bass: [45, 45, 57, 45, 41, 41, 53, 41, 43, 43, 55, 43, 40, 40, 52, 40],
     bassWave: 'triangle', bassGain: 0.22,
   },
+  cave: {
+    stepDur: 0.27,
+    melody: [57, null, 60, null, 64, null, 60, null, 55, null, 58, null, 62, null, 63, null],
+    melodyWave: 'triangle', melodyGain: 0.13,
+    bass: [33, null, null, null, 36, null, null, null, 31, null, null, null, 35, null, null, null],
+    bassWave: 'triangle', bassGain: 0.26,
+  },
 };
 
 export function isMuted() { return muted; }

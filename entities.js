@@ -16,9 +16,10 @@ const SAFE_ZONE = '1,1';
 export const OUTER_ZONES = ['0,0', '1,0', '2,0', '0,1', '2,1', '0,2', '1,2', '2,2'];
 
 // deterministic ant count per zone (queen zone gets the queen + 1)
-const ANT_COUNTS = { '0,0': 2, '1,0': 1, '2,0': 3, '0,1': 1, '2,1': 2, '0,2': 3, '1,2': 2, '2,2': 3 };
+const ANT_COUNTS = { '0,0': 2, '1,0': 1, '2,0': 3, '0,1': 1, '2,1': 2, '0,2': 3, '1,2': 2, '2,2': 3, 'U': 1 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
+const keyOf = g => g.inCave ? 'U' : g.zone.x + ',' + g.zone.y;
 
 // Current collectible type from the score, exactly like the Scratch tiers.
 export function itemType(score) {
@@ -30,6 +31,7 @@ export function itemType(score) {
 export function initItems(game) {
   // positions are assigned lazily, on first entry into each zone
   game.items = OUTER_ZONES.map(z => ({ zone: z, x: 0, y: 0, placed: false }));
+  game.items.push({ zone: 'U', x: 0, y: 0, placed: false }); // tunnel treasure
   game.drops = [];
   game.particles = [];
   game.floats = [];
@@ -37,7 +39,7 @@ export function initItems(game) {
 }
 
 export function enterZone(game, layout) {
-  const key = game.zone.x + ',' + game.zone.y;
+  const key = keyOf(game);
   const p = game.player;
   game.ants = [];
   game.drops = [];
@@ -65,7 +67,7 @@ export function enterZone(game, layout) {
 // ---- update ----
 
 export function updateEntities(game, dt, events, layout) {
-  const key = game.zone.x + ',' + game.zone.y;
+  const key = keyOf(game);
   const p = game.player;
 
   // collectibles in this zone
@@ -166,7 +168,7 @@ function getAntSprite(assets) {
 
 // Everything in the zone drawn back-to-front by baseY (painter's algorithm).
 export function drawEntities(ctx, assets, game, t, layout, drawPlayerFn) {
-  const key = game.zone.x + ',' + game.zone.y;
+  const key = keyOf(game);
   const drawables = [];
 
   for (const p of layout.props) drawables.push({ baseY: p.baseY, draw: () => ctx.drawImage(p.img, p.x, p.y, p.w, p.h) });

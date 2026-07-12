@@ -222,9 +222,74 @@ function river(L, rng, vertical, c0, bridgeAt, assets) {
   }
 }
 
+// ---- underground tunnel (linked by the two caves) ----
+
+function buildCaveLayout(assets) {
+  const rng = mulberry32(hashKey('U:' + W));
+  const L = {
+    name: 'The Old Tunnel', type: 'cave', gaps: {},
+    props: [], colliders: [], waters: [], bridges: [],
+    caveDoor: null, tentDoor: null, chestSpot: null, firePit: null,
+    exits: [], _snap: null,
+  };
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  // stone floor
+  ctx.fillStyle = '#332e28';
+  ctx.fillRect(0, 0, W, H);
+  for (let i = 0; i < 900; i++) {
+    ctx.fillStyle = ['#3a352e', '#2c2822', '#403a32', '#37322b'][Math.floor(rng() * 4)];
+    ctx.fillRect(Math.floor(rng() * W / 8) * 8, Math.floor(rng() * H / 8) * 8, 8, 8);
+  }
+  // rocky walls: dark blobs ringing the room
+  const wall = (x, y, r) => {
+    ctx.fillStyle = '#1c1916';
+    ctx.beginPath(); ctx.arc(x, y + 6, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#4a4238';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#5d5548';
+    ctx.beginPath(); ctx.arc(x - r * 0.25, y - r * 0.3, r * 0.5, 0, Math.PI * 2); ctx.fill();
+  };
+  for (let x = 0; x < W + 40; x += 46) { wall(x + rng() * 20, 30 + rng() * 26, 34 + rng() * 16); wall(x + rng() * 20, H - 36 - rng() * 20, 34 + rng() * 16); }
+  for (let y = 60; y < H - 40; y += 48) { wall(26 + rng() * 22, y, 34 + rng() * 14); wall(W - 30 - rng() * 22, y, 34 + rng() * 14); }
+  borderWalls(L, {});
+  // glowing crystals (the kids' gem, cyan-shifted, with a light pool)
+  const gem = assets.sprites['gem'];
+  for (let i = 0; i < 7; i++) {
+    const x = 140 + rng() * (W - 280), y = 150 + rng() * (H - 280);
+    const g = ctx.createRadialGradient(x, y, 4, x, y, 55);
+    g.addColorStop(0, 'rgba(120,220,255,0.35)');
+    g.addColorStop(1, 'rgba(120,220,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x - 55, y - 55, 110, 110);
+    const h = 24 + rng() * 16, w = h * (gem.width / gem.height);
+    ctx.drawImage(gem, x - w / 2, y - h / 2, w, h);
+  }
+  // two lit exits: west ladder -> campsite cave, east ladder -> battlefield cave
+  const ladder = (x, y) => {
+    const g = ctx.createRadialGradient(x, y, 6, x, y, 80);
+    g.addColorStop(0, 'rgba(255,240,180,0.5)');
+    g.addColorStop(1, 'rgba(255,240,180,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x - 80, y - 80, 160, 160);
+    ctx.fillStyle = '#7a5a30';
+    ctx.fillRect(x - 22, y - 46, 8, 92); ctx.fillRect(x + 14, y - 46, 8, 92);
+    for (let r = -38; r <= 38; r += 14) ctx.fillRect(x - 22, y + r, 44, 6);
+  };
+  const ex1 = { x: W * 0.14, y: H * 0.5 }, ex2 = { x: W * 0.86, y: H * 0.5 };
+  ladder(ex1.x, ex1.y); ladder(ex2.x, ex2.y);
+  L.exits.push({ rect: { x: ex1.x - 40, y: ex1.y - 50, w: 80, h: 100 }, to: '1,1' });
+  L.exits.push({ rect: { x: ex2.x - 40, y: ex2.y - 50, w: 80, h: 100 }, to: '1,0' });
+  L.ground = c;
+  return L;
+}
+
 // ---- zone recipes ----
 
 export function buildZoneLayout(key, assets) {
+  if (key === 'U') return buildCaveLayout(assets);
   const def = ZONE_DEFS[key];
   const rng = mulberry32(hashKey(key + ':' + W));
   const [zx, zy] = key.split(',').map(Number);
