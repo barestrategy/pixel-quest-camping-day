@@ -123,12 +123,12 @@ export function updateEntities(game, dt, events, layout) {
         burst(game, item.x, item.y, '#ff6b8a', 12);
         game.floats.push({ x: item.x, y: item.y - 20, text: '+♥', life: 0.9 });
       } else if (item.kind === 'berry') {
-        game.buffs.speed = 6;
+        game.buffs.speed = 10;
         events.onBuff();
         burst(game, item.x, item.y, '#ff8a94', 10);
         game.floats.push({ x: item.x, y: item.y - 20, text: 'ZOOM!', life: 1.1 });
       } else if (item.kind === 'smore') {
-        game.buffs.invuln = 5;
+        game.buffs.invuln = 8;
         events.onBuff();
         burst(game, item.x, item.y, '#fffdf2', 12);
         game.floats.push({ x: item.x, y: item.y - 20, text: "S'MORE POWER!", life: 1.2 });

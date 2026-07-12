@@ -72,22 +72,64 @@ function cropProp(imgs, [src, x, y, w, h], mode) {
   const ctx = c.getContext('2d');
   ctx.drawImage(imgs[src], x, y, w, h, 0, 0, w, h);
   if (mode === 'none') return c;
-  // elliptical vignette: the crop's grass corners fade out so props sit on any
-  // ground without showing their source rectangle
+  // blocky elliptical cutout: crops lose their rectangle corners with a crisp
+  // 4px-stepped edge (soft gradient fades read as blurry blobs in pixel art)
   const d = ctx.getImageData(0, 0, w, h);
   const rx = w / 2, ry = h / 2;
-  const [start, span] = mode === 'corners' ? [1.0, 0.55] : [0.72, 0.28];
-  for (let py = 0; py < h; py++) {
-    for (let px = 0; px < w; px++) {
-      const nx = (px - rx + 0.5) / rx, ny = (py - ry + 0.5) / ry;
-      const e = nx * nx + ny * ny; // 1.0 at the ellipse edge
-      if (e > start) {
-        const a = Math.max(0, 1 - (e - start) / span);
-        d.data[(py * w + px) * 4 + 3] *= a * a;
+  const cut = mode === 'corners' ? 1.45 : 0.94;
+  const B = 4;
+  for (let by = 0; by < h; by += B) {
+    for (let bx = 0; bx < w; bx += B) {
+      const nx = (bx + B / 2 - rx) / rx, ny = (by + B / 2 - ry) / ry;
+      if (nx * nx + ny * ny > cut) {
+        for (let py = by; py < Math.min(h, by + B); py++) {
+          for (let px = bx; px < Math.min(w, bx + B); px++) {
+            d.data[(py * w + px) * 4 + 3] = 0;
+          }
+        }
       }
     }
   }
   ctx.putImageData(d, 0, 0);
+  return c;
+}
+
+function rotate90(src) {
+  const c = document.createElement('canvas');
+  c.width = src.height; c.height = src.width;
+  const x = c.getContext('2d');
+  x.translate(c.width / 2, c.height / 2);
+  x.rotate(Math.PI / 2);
+  x.drawImage(src, -src.width / 2, -src.height / 2);
+  return c;
+}
+
+// A clean pixel well to replace the messy crop from the painting.
+function makeWell() {
+  const c = document.createElement('canvas');
+  c.width = 96; c.height = 100;
+  const x = c.getContext('2d');
+  const blockEllipse = (cx, cy, rx, ry, col) => {
+    x.fillStyle = col;
+    for (let dy = -ry; dy < ry; dy += 4) {
+      const hw = Math.floor(rx * Math.sqrt(Math.max(0, 1 - (dy / ry) ** 2)) / 4) * 4;
+      x.fillRect(cx - hw, cy + dy, hw * 2, 4);
+    }
+  };
+  // posts and little roof
+  x.fillStyle = '#6b4a26';
+  x.fillRect(12, 16, 8, 52); x.fillRect(76, 16, 8, 52);
+  x.fillStyle = '#8a5f33'; x.fillRect(4, 12, 88, 8);
+  x.fillStyle = '#a9713d'; x.fillRect(12, 4, 72, 8);
+  x.fillStyle = '#4a3418'; x.fillRect(20, 34, 56, 5); // crank bar
+  x.fillStyle = '#7d5a2e'; x.fillRect(41, 39, 14, 11); // bucket
+  x.fillStyle = '#5c3f1c'; x.fillRect(41, 39, 14, 3);
+  // stone ring
+  blockEllipse(48, 76, 44, 20, '#6e695f');
+  blockEllipse(48, 72, 44, 20, '#9a958a');
+  blockEllipse(48, 72, 30, 12, '#191512');
+  x.fillStyle = '#c9c4b8'; // highlight blocks
+  x.fillRect(16, 62, 8, 4); x.fillRect(60, 84, 8, 4);
   return c;
 }
 
@@ -306,6 +348,8 @@ export async function loadAssets() {
   }
   props['tent'] = makeTent();
   props['logs'] = makeLogs();
+  props['well'] = makeWell(); // replaces the messy crop
+  props['bridge-h'] = rotate90(props['bridge']); // for rivers that flow east-west
   props['berry'] = makeBerry();
   props['smore'] = makeSmore();
   props['hat-party'] = makeHat('party');

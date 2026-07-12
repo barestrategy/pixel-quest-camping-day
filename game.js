@@ -2,7 +2,7 @@
 import { W, H, setWorldWidth, loadAssets } from './assets.js';
 import { input, initInput, getMove, takeTap, clearFrameFlags, drawJoystick } from './input.js';
 import { initItems, enterZone, updateEntities, drawEntities, bonkAttack } from './entities.js';
-import { ZONE_DEFS, buildZoneLayout, snapshotLayout, moveWithCollision, blockedAt, randomOpenSpot } from './zonegen.js';
+import { ZONE_DEFS, buildZoneLayout, snapshotLayout, moveWithCollision, blockedAt, randomOpenSpot, findOpenNear } from './zonegen.js';
 import { unlock, setTheme, sfx, toggleMute, isMuted } from './audio.js';
 
 let layouts = {}; // zone key -> generated layout, rebuilt when the world resizes
@@ -17,10 +17,11 @@ const bonkBtn = () => ({ x: W - 78, y: H - 178, r: 48 });
 const startBtnRect = () => ({ x: W / 2 - 150, y: H - 165, w: 300, h: 105 });
 
 const HATS = [
-  { id: 'party', name: 'Party', cost: 5 },
-  { id: 'crown', name: 'Crown', cost: 10 },
-  { id: 'wizard', name: 'Wizard', cost: 15 },
+  { id: 'party', name: 'Party', cost: 4 },
+  { id: 'crown', name: 'Crown', cost: 8 },
+  { id: 'wizard', name: 'Wizard', cost: 12 },
 ];
+const BUFF_TIME = { speed: 10, invuln: 8 };
 let shopSlots = []; // world-space tap targets, rebuilt each draw
 
 const canvas = document.getElementById('game');
@@ -58,7 +59,7 @@ function clampToWorld() {
   const layout = getLayout(zoneKey());
   game.player.x = Math.max(30, Math.min(W - 30, game.player.x));
   if (blockedAt(layout, game.player.x, game.player.y, 20)) {
-    const pos = randomOpenSpot(layout);
+    const pos = findOpenNear(layout, game.player.x, game.player.y);
     game.player.x = pos.x; game.player.y = pos.y;
   }
   enterZone(game, layout); // respawn this zone's ants/items inside the new bounds
@@ -88,8 +89,8 @@ const game = {
   buffs: { speed: 0, invuln: 0 },
   queenDown: false,
   shopOpen: false,
-  hatsOwned: new Set(JSON.parse(localStorage.getItem('pq-hats') || '[]')),
-  hat: localStorage.getItem('pq-hat') || null,
+  hatsOwned: new Set(),
+  hat: null,
   banner: { text: '', t: 0 },
   transition: null,       // { dx, dy, t } while sliding between zones
   visited: new Set(['1,1']),
@@ -124,10 +125,15 @@ function startTransition(dx, dy) {
 function setState(s) {
   state = s;
   stateTime = 0;
+  if (s === 'TITLE' || s === 'SELECT') setTheme('menu');
 }
 
 function startGame(hero) {
   game.hero = hero;
+  // hats are unlocked per character
+  game.hatsOwned = new Set(JSON.parse(localStorage.getItem('pq-hats-' + hero) || '[]'));
+  game.hat = localStorage.getItem('pq-hat-' + hero) || null;
+  if (game.hat && !game.hatsOwned.has(game.hat)) game.hat = null;
   game.score = 0;
   game.carried = 0;
   game.banked = 0;
@@ -184,6 +190,10 @@ function update(dt) {
   if (state === 'TITLE') {
     if (tap) {
       game.select.chosen = null;
+      game.select.hats = {
+        pixely: localStorage.getItem('pq-hat-pixely') || null,
+        emily: localStorage.getItem('pq-hat-emily') || null,
+      };
       setState('SELECT');
     }
   } else if (state === 'SELECT') {
@@ -234,15 +244,15 @@ function shopTap(hat) {
   const p = game.player;
   if (game.hatsOwned.has(hat.id)) {
     game.hat = game.hat === hat.id ? null : hat.id;
-    localStorage.setItem('pq-hat', game.hat || '');
+    localStorage.setItem('pq-hat-' + game.hero, game.hat || '');
     sfx.pickup();
   } else if (game.wallet >= hat.cost) {
     game.wallet -= hat.cost;
     localStorage.setItem('pq-wallet', String(game.wallet));
     game.hatsOwned.add(hat.id);
-    localStorage.setItem('pq-hats', JSON.stringify([...game.hatsOwned]));
+    localStorage.setItem('pq-hats-' + game.hero, JSON.stringify([...game.hatsOwned]));
     game.hat = hat.id;
-    localStorage.setItem('pq-hat', hat.id);
+    localStorage.setItem('pq-hat-' + game.hero, hat.id);
     sfx.clink();
     game.floats.push({ x: p.x, y: p.y - 60, text: hat.name + ' hat!', life: 1.2 });
   } else {
@@ -411,6 +421,10 @@ function onZoneEnter() {
   const key = zoneKey();
   game.visited.add(key);
   const layout = getLayout(key);
+  // never arrive stuck inside water or a wall
+  const pos = findOpenNear(layout, game.player.x, game.player.y);
+  game.player.x = pos.x;
+  game.player.y = pos.y;
   showBanner(layout.name);
   enterZone(game, layout);
   setTheme(key === 'U' ? 'cave' : key === '1,1' ? 'camp' : 'adventure');
@@ -639,14 +653,14 @@ function drawHud() {
   }
   // active buff icons under the hearts
   let bx = 18;
-  for (const [buff, prop, max] of [['speed', 'berry', 6], ['invuln', 'smore', 5]]) {
+  for (const [buff, prop] of [['speed', 'berry'], ['invuln', 'smore']]) {
     if (game.buffs[buff] > 0) {
       const img = assets.props[prop];
       ctx.drawImage(img, bx, 62, 30, 30 * (img.height / img.width));
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
       ctx.fillRect(bx, 94, 30, 5);
       ctx.fillStyle = '#8aff8a';
-      ctx.fillRect(bx, 94, 30 * Math.min(1, game.buffs[buff] / max), 5);
+      ctx.fillRect(bx, 94, 30 * Math.min(1, game.buffs[buff] / BUFF_TIME[buff]), 5);
       bx += 40;
     }
   }
@@ -728,6 +742,12 @@ function drawSelect(t) {
       ctx.fill();
     }
     ctx.drawImage(spr, cx - w / 2, cy - h / 2, w, h);
+    const ownHat = game.select.hats && game.select.hats[hero];
+    if (ownHat) {
+      const hatImg = assets.props['hat-' + ownHat];
+      const hw = w * 0.62, hh = hw * (hatImg.height / hatImg.width);
+      ctx.drawImage(hatImg, cx - hw / 2, cy - h / 2 - hh + h * 0.09, hw, hh);
+    }
     // name chip
     ctx.fillStyle = '#fff';
     const chipW = 150, chipY = strip + 24;

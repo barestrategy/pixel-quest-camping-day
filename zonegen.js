@@ -87,13 +87,26 @@ function addProp(L, img, cx, footY, h, opts = {}) {
   const w = h * (img.width / img.height);
   const p = { img, x: cx - w / 2, y: footY - h, w, h, baseY: footY - h * 0.06 };
   if (opts.solid !== false) {
-    const bw = w * (opts.bw ?? 0.62), bh = h * (opts.bh ?? 0.24);
+    const bw = w * (opts.bw ?? 0.72), bh = h * (opts.bh ?? 0.3);
     p.box = opts.centerBox
       ? { x: cx - bw / 2, y: footY - h * 0.62, w: bw, h: h * 0.5 }
       : { x: cx - bw / 2, y: footY - bh, w: bw, h: bh };
     L.colliders.push(p.box);
   }
   L.props.push(p);
+  return p;
+}
+
+// Cave collision with a real doorway: solid left/right of the opening and a
+// back wall above it, so heroes can actually walk in.
+function caveWithDoor(L, img, cx, footY, h, doorFrac) {
+  const p = addProp(L, img, cx, footY, h, { solid: false });
+  const doorW = p.w * doorFrac;
+  const wallY = footY - h * 0.55, wallH = h * 0.55;
+  L.colliders.push({ x: p.x, y: wallY, w: (p.w - doorW) / 2, h: wallH });
+  L.colliders.push({ x: cx + doorW / 2, y: wallY, w: (p.w - doorW) / 2, h: wallH });
+  L.colliders.push({ x: p.x, y: p.y + h * 0.1, w: p.w, h: h * 0.28 }); // back wall
+  L.caveDoor = { x: cx - doorW / 2, y: footY - h * 0.42, w: doorW, h: h * 0.46 };
   return p;
 }
 
@@ -182,44 +195,64 @@ function river(L, rng, vertical, c0, bridgeAt, assets) {
   const ctx = L.ground.getContext('2d');
   const phase = rng() * 6;
   const len = vertical ? H : W;
-  const center = t => c0 + Math.sin(t / 150 + phase) * 32;
-  for (let t = -8; t < len + 8; t += 6) {
+  const PX = 8; // stair-stepped 8px blocks — proper 8-bit water
+  const center = t => Math.round((c0 + Math.sin(t / 150 + phase) * 32) / PX) * PX;
+  // blocky pool under the bridge so the bridge crop's water edges blend in
+  const bc = center(bridgeAt);
+  const pool = (rx, ry, col) => {
+    ctx.fillStyle = col;
+    for (let dy = -ry; dy < ry; dy += PX) {
+      const hw = Math.floor(rx * Math.sqrt(Math.max(0, 1 - (dy / ry) ** 2)) / PX) * PX;
+      if (vertical) ctx.fillRect(bc - hw, bridgeAt + dy, hw * 2, PX);
+      else ctx.fillRect(bridgeAt + dy, bc - hw, PX, hw * 2);
+    }
+  };
+  const bands = [[40, '#2f6f9f'], [24, '#58a8d8'], [8, '#a5d8f0']];
+  for (let t = -PX; t < len + PX; t += PX) {
     const c = center(t);
-    const bands = [[34, '#2f6f9f'], [26, '#58a8d8'], [13, '#a5d8f0']];
     for (const [hw, col] of bands) {
       ctx.fillStyle = col;
-      if (vertical) ctx.fillRect(c - hw, t, hw * 2, 7);
-      else ctx.fillRect(t, c - hw, 7, hw * 2);
+      if (vertical) ctx.fillRect(c - hw, t, hw * 2, PX);
+      else ctx.fillRect(t, c - hw, PX, hw * 2);
     }
-    if (rng() < 0.10) {
-      ctx.fillStyle = 'rgba(255,255,255,0.8)';
-      const fo = (rng() - 0.5) * 40;
-      if (vertical) ctx.fillRect(c + fo, t, 3, 3); else ctx.fillRect(t, c + fo, 3, 3);
+    if (rng() < 0.14) { // foam blocks
+      ctx.fillStyle = '#d8effc';
+      const fo = (Math.floor(rng() * 8) - 4) * PX;
+      if (vertical) ctx.fillRect(c + fo, t, PX / 2, PX / 2);
+      else ctx.fillRect(t, c + fo, PX / 2, PX / 2);
     }
   }
+  pool(88, 44, '#58a8d8');
+  pool(72, 32, '#8fc9ea');
   for (let t = 0; t < len; t += 24) {
-    const c = center(t + 12);
-    L.waters.push(vertical ? { x: c - 32, y: t, w: 64, h: 24 } : { x: t, y: c - 32, w: 24, h: 64 });
+    const c = center(t);
+    L.waters.push(vertical ? { x: c - 38, y: t, w: 76, h: 24 } : { x: t, y: c - 38, w: 24, h: 76 });
   }
-  // bridge: kids' stone bridge, walkable strip over the water
-  const bc = center(bridgeAt);
-  // widen the water under the bridge so the bridge crop's water edges blend in
-  for (const [rx, ry, col] of [[86, 42, '#2f6f9f'], [78, 36, '#58a8d8'], [62, 26, '#a5d8f0']]) {
-    ctx.fillStyle = col;
-    ctx.beginPath();
-    if (vertical) ctx.ellipse(bc, bridgeAt, rx, ry, 0, 0, Math.PI * 2);
-    else ctx.ellipse(bridgeAt, bc, ry, rx, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  const img = assets.props['bridge'];
-  const bw = 148, bh = bw * (img.height / img.width);
+  // the kids' stone bridge — rotated so the walkway crosses the water
+  const img = vertical ? assets.props['bridge'] : assets.props['bridge-h'];
   if (vertical) {
+    const bw = 148, bh = bw * (img.height / img.width);
     L.props.push({ img, x: bc - bw / 2, y: bridgeAt - bh / 2, w: bw, h: bh, baseY: 0 }); // baseY 0: under entities
-    L.bridges.push({ x: bc - 56, y: bridgeAt - 44, w: 112, h: 88 });
+    L.bridges.push({ x: bc - 56, y: bridgeAt - 46, w: 112, h: 92 });
   } else {
+    const bh = 148, bw = bh * (img.width / img.height);
     L.props.push({ img, x: bridgeAt - bw / 2, y: bc - bh / 2, w: bw, h: bh, baseY: 0 });
-    L.bridges.push({ x: bridgeAt - 56, y: bc - 44, w: 112, h: 88 });
+    L.bridges.push({ x: bridgeAt - 46, y: bc - 56, w: 92, h: 112 });
   }
+}
+
+// Nearest walkable spot to (x, y) — rescues anyone who ends up inside a wall.
+export function findOpenNear(layout, x, y) {
+  if (!blockedAt(layout, x, y, 22)) return { x, y };
+  for (let r = 24; r <= 420; r += 24) {
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const nx = Math.max(30, Math.min(W - 30, x + Math.cos(a) * r));
+      const ny = Math.max(80, Math.min(H - 30, y + Math.sin(a) * r));
+      if (!blockedAt(layout, nx, ny, 22)) return { x: nx, y: ny };
+    }
+  }
+  return { x: W / 2, y: H / 2 };
 }
 
 // ---- underground tunnel (linked by the two caves) ----
@@ -320,8 +353,7 @@ export function buildZoneLayout(key, assets) {
 
   if (def.type === 'campsite') {
     river(L, rng, true, W * 0.72, H * 0.5, assets);
-    const cave = addProp(L, P['cave-dark'], W * 0.17, H * 0.26, 128, { bw: 0.85, bh: 0.5 });
-    L.caveDoor = { x: cave.x + cave.w * 0.32, y: cave.y + cave.h * 0.55, w: cave.w * 0.36, h: cave.h * 0.42 };
+    caveWithDoor(L, P['cave-dark'], W * 0.17, H * 0.26, 128, 0.38);
     addProp(L, P['sign-go'], W * 0.17 + 95, H * 0.26, 46, { solid: false });
     addProp(L, P['well'], W * 0.46, H * 0.44, 88, { bw: 0.8, bh: 0.4 });
     addProp(L, P['pine-big'], W * 0.3, H * 0.3, 165);
@@ -339,8 +371,7 @@ export function buildZoneLayout(key, assets) {
     addProp(L, P['sign-post'], W * 0.6, H * 0.72, 46, { solid: false });
     scatter(L, rng, [P['tree1'], P['tree2'], P['tree3']], 3, 80, 110);
   } else if (def.type === 'battlefield') {
-    const cave = addProp(L, P['cave-stone'], W * 0.21, H * 0.33, 205, { bw: 0.8, bh: 0.42 });
-    L.caveDoor = { x: cave.x + cave.w * 0.34, y: cave.y + cave.h * 0.5, w: cave.w * 0.32, h: cave.h * 0.48 };
+    caveWithDoor(L, P['cave-stone'], W * 0.21, H * 0.33, 205, 0.3);
     addProp(L, P['sign-go'], W * 0.21 + 130, H * 0.33, 48, { solid: false });
     addProp(L, P['pond'], W * 0.63, H * 0.36, 175, { bw: 0.8, centerBox: true });
     addProp(L, P['obelisk'], W * 0.79, H * 0.7, 168, { bw: 0.5, bh: 0.2 });
@@ -349,7 +380,8 @@ export function buildZoneLayout(key, assets) {
     scatter(L, rng, [P['tree1'], P['tree2']], 3, 78, 105);
     scatter(L, rng, [P['rock1'], P['rock2']], 3, 36, 54);
   } else if (def.type === 'riverbend') {
-    river(L, rng, false, H * 0.44, W * 0.5, assets);
+    // river sits in the north third, clear of the east/west entry corridors
+    river(L, rng, false, H * 0.22, W * 0.5, assets);
     scatter(L, rng, [P['tree1'], P['tree2'], P['tree3']], 6, 80, 115);
     scatter(L, rng, [P['rock3']], 2, 38, 52);
   } else if (def.type === 'rocks') {

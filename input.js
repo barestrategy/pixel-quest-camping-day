@@ -51,8 +51,18 @@ export function initInput(canvas) {
       downInfo = null;
     }
   };
-  canvas.addEventListener('pointerup', end);
-  canvas.addEventListener('pointercancel', end);
+  // listen on window so a release outside the canvas never leaves the stick stuck
+  window.addEventListener('pointerup', end);
+  window.addEventListener('pointercancel', end);
+
+  const resetAll = () => {
+    joyPointerId = null;
+    input.joy.active = false;
+    input.keys.clear();
+    downInfo = null;
+  };
+  window.addEventListener('blur', resetAll);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) resetAll(); });
 
   const KEYMAP = {
     ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',

@@ -25,6 +25,13 @@ const THEMES = {
     bass: [45, 45, 57, 45, 41, 41, 53, 41, 43, 43, 55, 43, 40, 40, 52, 40],
     bassWave: 'triangle', bassGain: 0.22,
   },
+  menu: {
+    stepDur: 0.24,
+    melody: [67, null, 72, null, 76, 74, 72, null, 74, null, 71, null, 72, null, null, null],
+    melodyWave: 'triangle', melodyGain: 0.15,
+    bass: [48, null, 55, null, 52, null, 55, null, 45, null, 52, null, 48, null, 55, null],
+    bassWave: 'triangle', bassGain: 0.18,
+  },
   cave: {
     stepDur: 0.27,
     melody: [57, null, 60, null, 64, null, 60, null, 55, null, 58, null, 62, null, 63, null],
