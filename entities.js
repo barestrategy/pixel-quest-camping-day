@@ -59,9 +59,50 @@ export function enterZone(game, layout) {
     const pos = randomOpenSpot(layout, 60, p, 280);
     game.ants.push({ x: pos.x, y: pos.y, heading: rand(0, Math.PI * 2), turnT: rand(0.6, 2), queen: false });
   }
-  if (key === QUEEN_ZONE) {
+  if (key === QUEEN_ZONE && !game.queenDown) {
     const pos = randomOpenSpot(layout, 80, p, 340);
-    game.ants.push({ x: pos.x, y: pos.y, heading: rand(0, Math.PI * 2), turnT: 1, queen: true });
+    game.ants.push({ x: pos.x, y: pos.y, heading: rand(0, Math.PI * 2), turnT: 1, queen: true, hp: 3, state: 'wander', stateT: 0 });
+  }
+}
+
+// The hero swings in their facing direction; nearby ants get bonked.
+const DIRV = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
+
+export function bonkAttack(game, events) {
+  const p = game.player;
+  const dv = DIRV[p.dir];
+  for (const a of game.ants) {
+    if (a.gone || a.bonked) continue;
+    const dx = a.x - p.x, dy = a.y - p.y;
+    const d = Math.hypot(dx, dy) || 1;
+    if (d > 100 || (dx * dv.x + dy * dv.y) / d < -0.25) continue;
+    if (a.queen) {
+      a.hp--;
+      a.hurtFlash = 0.45;
+      a.state = 'cooldown'; a.stateT = 1.2;
+      a.x += (dx / d) * 46; a.y += (dy / d) * 46;
+      if (a.hp <= 0) {
+        a.gone = true;
+        a.respawnT = Infinity;
+        game.queenDown = true;
+        for (let i = 0; i < 5; i++) { // gem shower!
+          game.drops.push({
+            x: a.x, y: a.y, vx: rand(-240, 240), vy: rand(-340, -160),
+            type: 'gem', age: 0, settled: false,
+          });
+        }
+        burst(game, a.x, a.y, '#ffd94d', 22);
+        events.onQueenDown();
+      } else {
+        burst(game, a.x, a.y, '#e8302a', 8);
+        events.onQueenHit();
+      }
+    } else {
+      a.bonked = { t: 0.85, vx: (dx / d) * 280, vy: (dy / d) * 280 - 60 };
+      a.respawnT = rand(6, 10);
+      burst(game, a.x, a.y, '#fff', 8);
+      events.onBonk();
+    }
   }
 }
 
@@ -81,17 +122,32 @@ export function updateEntities(game, dt, events, layout) {
         events.onHeal();
         burst(game, item.x, item.y, '#ff6b8a', 12);
         game.floats.push({ x: item.x, y: item.y - 20, text: '+♥', life: 0.9 });
+      } else if (item.kind === 'berry') {
+        game.buffs.speed = 6;
+        events.onBuff();
+        burst(game, item.x, item.y, '#ff8a94', 10);
+        game.floats.push({ x: item.x, y: item.y - 20, text: 'ZOOM!', life: 1.1 });
+      } else if (item.kind === 'smore') {
+        game.buffs.invuln = 5;
+        events.onBuff();
+        burst(game, item.x, item.y, '#fffdf2', 12);
+        game.floats.push({ x: item.x, y: item.y - 20, text: "S'MORE POWER!", life: 1.2 });
       } else {
         game.carried++;
         events.onPickup();
         burst(game, item.x, item.y, '#ffd94d', 12);
         game.floats.push({ x: item.x, y: item.y - 20, text: '+1', life: 0.9 });
       }
-      // pops away to a random spot in a random outer zone, sometimes as a heart
+      // pops away to a random spot in a random outer zone, sometimes as a
+      // heart or a snack power-up
       item.zone = OUTER_ZONES[Math.floor(Math.random() * OUTER_ZONES.length)];
       item.placed = false;
-      const heartsActive = game.items.filter(i => i.kind === 'heart' && i !== item).length;
-      item.kind = heartsActive < 2 && Math.random() < 0.12 ? 'heart' : 'treasure';
+      const count = kind => game.items.filter(i => i.kind === kind && i !== item).length;
+      const roll = Math.random();
+      if (count('heart') < 2 && roll < 0.12) item.kind = 'heart';
+      else if (count('berry') < 1 && roll < 0.19) item.kind = 'berry';
+      else if (count('smore') < 1 && roll < 0.26) item.kind = 'smore';
+      else item.kind = 'treasure';
       if (item.zone === key) {
         const pos = randomOpenSpot(layout, 50, p, 200);
         item.x = pos.x; item.y = pos.y; item.placed = true;
@@ -142,14 +198,62 @@ export function updateEntities(game, dt, events, layout) {
   }
 
   // ants
+  const invuln = game.buffs && game.buffs.invuln > 0;
   for (const a of game.ants) {
+    // bonked: spin away, then wait to respawn at a new spot
+    if (a.bonked) {
+      a.bonked.t -= dt;
+      a.x += a.bonked.vx * dt; a.y += a.bonked.vy * dt;
+      a.bonked.vx *= 0.94; a.bonked.vy *= 0.94;
+      if (a.bonked.t <= 0) { a.bonked = null; a.gone = true; }
+      continue;
+    }
+    if (a.gone) {
+      a.respawnT -= dt;
+      if (a.respawnT <= 0) {
+        const pos = randomOpenSpot(layout, 60, p, 300);
+        a.x = pos.x; a.y = pos.y; a.gone = false; a.chasing = false;
+      }
+      continue;
+    }
+
     const chaseSpeed = a.queen ? QUEEN_CHASE_SPEED : ANT_CHASE_SPEED;
     const aggro = a.queen ? QUEEN_AGGRO : ANT_AGGRO;
     const size = a.queen ? QUEEN_SIZE : ANT_SIZE;
     const dx = p.x - a.x, dy = p.y - a.y;
     const dist = Math.hypot(dx, dy);
     let speed = ANT_WANDER_SPEED;
-    if (dist < aggro) {
+    if (a.hurtFlash > 0) a.hurtFlash -= dt;
+
+    if (a.queen) {
+      // boss brain: wander -> telegraph ('!!') -> charge -> cooldown
+      a.stateT -= dt;
+      if (a.state === 'telegraph') {
+        speed = 0;
+        if (a.stateT <= 0) {
+          a.state = 'charge'; a.stateT = 0.8;
+          a.heading = Math.atan2(dy, dx);
+        }
+      } else if (a.state === 'charge') {
+        speed = 430;
+        if (a.stateT <= 0) { a.state = 'cooldown'; a.stateT = 1.3; }
+      } else if (a.state === 'cooldown') {
+        speed = 70;
+        a.turnT -= dt;
+        if (a.turnT <= 0) { a.heading = rand(0, Math.PI * 2); a.turnT = rand(0.6, 1.4); }
+        if (a.stateT <= 0) a.state = 'wander';
+      } else { // wander
+        speed = 95;
+        a.turnT -= dt;
+        if (a.turnT <= 0) { a.heading = rand(0, Math.PI * 2); a.turnT = rand(0.6, 2); }
+        if (dist < aggro && a.stateT <= 0) { a.state = 'telegraph'; a.stateT = 0.7; events.onQueenRoar(); }
+      }
+      a.chasing = a.state === 'charge';
+    } else if (invuln && dist < aggro * 1.2) {
+      a.heading = Math.atan2(-dy, -dx); // flee the s'more-powered hero!
+      speed = chaseSpeed;
+      a.chasing = false;
+    } else if (dist < aggro) {
       a.heading = Math.atan2(dy, dx); // spotted you — chase!
       speed = chaseSpeed;
       a.chasing = true;
@@ -160,13 +264,13 @@ export function updateEntities(game, dt, events, layout) {
     }
     const r = size * 0.3;
     const hit = moveWithCollision(a, Math.cos(a.heading) * speed * dt, Math.sin(a.heading) * speed * dt, layout, r);
-    if (hit.hitX) a.heading = Math.PI - a.heading;
-    if (hit.hitY) a.heading = -a.heading;
+    if (hit.hitX) { a.heading = Math.PI - a.heading; if (a.state === 'charge') a.stateT = 0; }
+    if (hit.hitY) { a.heading = -a.heading; if (a.state === 'charge') a.stateT = 0; }
     a.x = Math.max(r, Math.min(W - r, a.x));
     a.y = Math.max(r, Math.min(H - r, a.y));
 
     // contact damage
-    if (p.hurtT <= 0 && dist < size / 2 + 22) {
+    if (!invuln && p.hurtT <= 0 && dist < size / 2 + 22) {
       game.hearts--;
       p.hurtT = 1;
       if (game.carried > 0) { // one carried treasure pops loose
@@ -245,6 +349,7 @@ export function drawEntities(ctx, assets, game, t, layout, drawPlayerFn) {
   }
 
   for (const a of game.ants) {
+    if (a.gone) continue;
     drawables.push({ baseY: a.y + (a.queen ? QUEEN_SIZE : ANT_SIZE) / 2, draw: () => drawAnt(ctx, assets, a, t) });
   }
 
@@ -338,6 +443,11 @@ function drawItem(ctx, assets, game, item, t) {
     drawHeartAt(ctx, item.x, item.y + bob0, 5);
     return;
   }
+  if (item.kind === 'berry' || item.kind === 'smore') {
+    const spr = assets.props[item.kind];
+    ctx.drawImage(spr, item.x - spr.width, item.y - spr.height + bob0, spr.width * 2, spr.height * 2);
+    return;
+  }
   const spr = assets.sprites[itemType(game.score)];
   const h = 46, w = h * (spr.width / spr.height);
   const bob = bob0;
@@ -360,15 +470,36 @@ function drawAnt(ctx, assets, a, t) {
   const w = h * (spr.width / spr.height);
   const scurry = a.chasing ? Math.sin(t * 0.03) * 3 : 0;
   const flip = Math.cos(a.heading) < 0;
+  const shake = a.queen && a.state === 'telegraph' ? (Math.random() - 0.5) * 6 : 0;
   ctx.save();
-  ctx.translate(a.x, a.y + scurry);
+  ctx.translate(a.x + shake, a.y + scurry);
+  if (a.bonked) { // spinning away!
+    const k = a.bonked.t / 0.85;
+    ctx.globalAlpha = k;
+    ctx.rotate((1 - k) * 14);
+    ctx.scale(0.4 + k * 0.6, 0.4 + k * 0.6);
+  }
   if (flip) ctx.scale(-1, 1);
   ctx.drawImage(spr, -w / 2, -h / 2, w, h);
+  if (a.hurtFlash > 0 && Math.floor(t / 70) % 2 === 0) {
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = 'rgba(255,80,80,0.55)';
+    ctx.fillRect(-w / 2, -h / 2, w, h);
+  }
   ctx.restore();
-  if (a.chasing) { // alert marker
-    ctx.font = 'bold 26px "Courier New", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#e8302a';
+  ctx.font = 'bold 26px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#e8302a';
+  if (a.queen && a.state === 'telegraph') {
+    ctx.font = 'bold 34px "Courier New", monospace';
+    ctx.fillText('!!', a.x, a.y - h / 2 - 8);
+  } else if (a.chasing && !a.bonked) {
     ctx.fillText('!', a.x, a.y - h / 2 - 6);
+  }
+  if (a.queen) { // boss health pips
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = i < a.hp ? '#e8302a' : 'rgba(0,0,0,0.35)';
+      ctx.fillRect(a.x - 24 + i * 18, a.y + h / 2 + 8, 12, 8);
+    }
   }
 }

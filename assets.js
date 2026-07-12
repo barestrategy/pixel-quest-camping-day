@@ -223,6 +223,59 @@ function makeLogs() {
   return c;
 }
 
+function makeBerry() {
+  const c = document.createElement('canvas');
+  c.width = 26; c.height = 26;
+  const x = c.getContext('2d');
+  x.fillStyle = '#2f8a1f';
+  x.fillRect(11, 2, 4, 6); // stem
+  x.fillRect(14, 4, 7, 4); // leaf
+  for (const [bx, by] of [[8, 14], [16, 14], [12, 19]]) {
+    x.fillStyle = '#d81f30';
+    x.beginPath(); x.arc(bx, by, 6, 0, 7); x.fill();
+    x.fillStyle = '#ff8a94';
+    x.fillRect(bx - 3, by - 4, 2, 2);
+  }
+  return c;
+}
+
+function makeSmore() {
+  const c = document.createElement('canvas');
+  c.width = 30; c.height = 24;
+  const x = c.getContext('2d');
+  x.fillStyle = '#c98a3b'; x.fillRect(2, 1, 26, 6);   // graham top
+  x.fillStyle = '#fffdf2'; x.fillRect(4, 7, 22, 6);   // marshmallow
+  x.fillStyle = '#5d3413'; x.fillRect(3, 13, 24, 4);  // chocolate
+  x.fillStyle = '#c98a3b'; x.fillRect(2, 17, 26, 6);  // graham bottom
+  x.fillStyle = '#e8ab5e'; x.fillRect(2, 1, 26, 2); x.fillRect(2, 17, 26, 2);
+  return c;
+}
+
+function makeHat(kind) {
+  const c = document.createElement('canvas');
+  c.width = 36; c.height = 26;
+  const x = c.getContext('2d');
+  if (kind === 'party') {
+    x.fillStyle = '#ff4fa3';
+    x.beginPath(); x.moveTo(18, 1); x.lineTo(30, 24); x.lineTo(6, 24); x.closePath(); x.fill();
+    x.fillStyle = '#ffd84d';
+    x.fillRect(14, 8, 3, 3); x.fillRect(20, 14, 3, 3); x.fillRect(11, 18, 3, 3);
+    x.beginPath(); x.arc(18, 3, 4, 0, 7); x.fill();
+  } else if (kind === 'crown') {
+    x.fillStyle = '#ffd84d';
+    x.beginPath();
+    x.moveTo(5, 24); x.lineTo(5, 8); x.lineTo(12, 16); x.lineTo(18, 4); x.lineTo(24, 16); x.lineTo(31, 8); x.lineTo(31, 24);
+    x.closePath(); x.fill();
+    x.fillStyle = '#e8302a'; x.fillRect(16, 17, 4, 4);
+  } else { // wizard
+    x.fillStyle = '#4053c9';
+    x.beginPath(); x.moveTo(18, 0); x.lineTo(27, 20); x.lineTo(9, 20); x.closePath(); x.fill();
+    x.fillRect(2, 20, 32, 5);
+    x.fillStyle = '#ffd84d'; x.fillRect(16, 10, 4, 4);
+  }
+  return c;
+}
+
 function cloneCanvas(c) {
   const out = document.createElement('canvas');
   out.width = c.width; out.height = c.height;
@@ -253,6 +306,11 @@ export async function loadAssets() {
   }
   props['tent'] = makeTent();
   props['logs'] = makeLogs();
+  props['berry'] = makeBerry();
+  props['smore'] = makeSmore();
+  props['hat-party'] = makeHat('party');
+  props['hat-crown'] = makeHat('crown');
+  props['hat-wizard'] = makeHat('wizard');
   props['grass1-dark'] = applyColorFilter(cloneCanvas(props['grass1']), { bright: 0.78 });
   props['grass1-sunny'] = applyColorFilter(cloneCanvas(props['grass1']), { hue: -10, bright: 1.12 });
   props['grass2-autumn'] = applyColorFilter(cloneCanvas(props['grass2']), { hue: -30, sat: 1.05 });

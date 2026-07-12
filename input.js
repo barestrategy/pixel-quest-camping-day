@@ -62,7 +62,8 @@ export function initInput(canvas) {
   window.addEventListener('keydown', e => {
     const k = KEYMAP[e.key];
     if (k) { input.keys.add(k); e.preventDefault(); }
-    if (e.key === ' ' || e.key === 'Enter') { input.taps.push({ x: innerWidth / 2, y: innerHeight / 2 }); input.anyPress = true; }
+    if (e.key === ' ') { input.bonkPressed = true; input.anyPress = true; e.preventDefault(); }
+    if (e.key === 'Enter') { input.taps.push({ x: innerWidth / 2, y: innerHeight / 2 }); input.anyPress = true; }
   });
   window.addEventListener('keyup', e => {
     const k = KEYMAP[e.key];
@@ -94,6 +95,7 @@ export function takeTap() {
 
 export function clearFrameFlags() {
   input.anyPress = false;
+  input.bonkPressed = false;
 }
 
 // Draw the joystick overlay in screen space.

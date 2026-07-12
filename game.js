@@ -1,7 +1,7 @@
 // Pixel Quest Camping Day — main loop and state machine.
 import { W, H, setWorldWidth, loadAssets } from './assets.js';
 import { input, initInput, getMove, takeTap, clearFrameFlags, drawJoystick } from './input.js';
-import { initItems, enterZone, updateEntities, drawEntities } from './entities.js';
+import { initItems, enterZone, updateEntities, drawEntities, bonkAttack } from './entities.js';
 import { ZONE_DEFS, buildZoneLayout, snapshotLayout, moveWithCollision, blockedAt, randomOpenSpot } from './zonegen.js';
 import { unlock, setTheme, sfx, toggleMute, isMuted } from './audio.js';
 
@@ -13,7 +13,15 @@ function getLayout(key) {
 }
 
 const muteBtn = () => ({ x: W - 64, y: H - 64, r: 30 });
+const bonkBtn = () => ({ x: W - 78, y: H - 178, r: 48 });
 const startBtnRect = () => ({ x: W / 2 - 150, y: H - 165, w: 300, h: 105 });
+
+const HATS = [
+  { id: 'party', name: 'Party', cost: 5 },
+  { id: 'crown', name: 'Crown', cost: 10 },
+  { id: 'wizard', name: 'Wizard', cost: 15 },
+];
+let shopSlots = []; // world-space tap targets, rebuilt each draw
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -77,6 +85,11 @@ const game = {
   select: { chosen: null },
   inCave: false,
   fade: null,
+  buffs: { speed: 0, invuln: 0 },
+  queenDown: false,
+  shopOpen: false,
+  hatsOwned: new Set(JSON.parse(localStorage.getItem('pq-hats') || '[]')),
+  hat: localStorage.getItem('pq-hat') || null,
   banner: { text: '', t: 0 },
   transition: null,       // { dx, dy, t } while sliding between zones
   visited: new Set(['1,1']),
@@ -119,12 +132,17 @@ function startGame(hero) {
   game.carried = 0;
   game.banked = 0;
   game.rested = false;
+  game.buffs = { speed: 0, invuln: 0 };
+  game.queenDown = false;
+  game.shopOpen = false;
   game.hearts = 6;
   game.zone = { x: 1, y: 1 };
   game.player.x = W / 2;
   game.player.y = H / 2 + 60;
   game.player.dir = 'down';
   game.player.hurtT = 0;
+  game.player.swing = null;
+  game.player.swingCd = 0;
   game.transition = null;
   game.inCave = false;
   game.fade = null;
@@ -180,12 +198,98 @@ function update(dt) {
       }
     }
   } else if (state === 'PLAY') {
+    if (tap) {
+      const w = toWorld(tap.x, tap.y);
+      const bb = bonkBtn();
+      if (Math.hypot(w.x - bb.x, w.y - bb.y) < bb.r + 12) {
+        tryBonk();
+        tap = null;
+      } else if (game.shopOpen) {
+        for (const slot of shopSlots) {
+          if (w.x > slot.x && w.x < slot.x + slot.w && w.y > slot.y && w.y < slot.y + slot.h) {
+            shopTap(slot.hat);
+            tap = null;
+            break;
+          }
+        }
+      }
+    }
+    if (input.bonkPressed) tryBonk();
     updatePlay(dt);
   } else if (state === 'WIN' || state === 'DIED') {
     if (tap && stateTime > 0.8) setState('TITLE');
   }
   clearFrameFlags();
 }
+
+function tryBonk() {
+  const p = game.player;
+  if (state !== 'PLAY' || game.transition || game.fade || p.swingCd > 0) return;
+  p.swing = { t: 0.25, dir: p.dir };
+  p.swingCd = 0.45;
+  bonkAttack(game, entityEvents);
+}
+
+function shopTap(hat) {
+  const p = game.player;
+  if (game.hatsOwned.has(hat.id)) {
+    game.hat = game.hat === hat.id ? null : hat.id;
+    localStorage.setItem('pq-hat', game.hat || '');
+    sfx.pickup();
+  } else if (game.wallet >= hat.cost) {
+    game.wallet -= hat.cost;
+    localStorage.setItem('pq-wallet', String(game.wallet));
+    game.hatsOwned.add(hat.id);
+    localStorage.setItem('pq-hats', JSON.stringify([...game.hatsOwned]));
+    game.hat = hat.id;
+    localStorage.setItem('pq-hat', hat.id);
+    sfx.clink();
+    game.floats.push({ x: p.x, y: p.y - 60, text: hat.name + ' hat!', life: 1.2 });
+  } else {
+    sfx.buzz();
+    game.floats.push({ x: p.x, y: p.y - 60, text: 'Need more treasure!', life: 1.2 });
+  }
+}
+
+const entityEvents = {
+  onPickup: () => {
+    sfx.pickup();
+    game.score = game.carried + game.banked;
+    if (game.score >= 15) endGame(true);
+  },
+  onHeal: () => sfx.heal(),
+  onRest: () => sfx.rest(),
+  onBuff: () => sfx.buff(),
+  onBank: n => {
+    sfx.clink();
+    game.wallet += n;
+    localStorage.setItem('pq-wallet', String(game.wallet));
+  },
+  onDropLost: () => {
+    game.score = game.carried + game.banked;
+    sfx.drop();
+  },
+  onBonk: () => {
+    sfx.bonk();
+    game.shake = Math.max(game.shake, 0.15);
+  },
+  onQueenRoar: () => sfx.buzz(),
+  onQueenHit: () => {
+    sfx.bossHit();
+    game.shake = 0.35;
+  },
+  onQueenDown: () => {
+    sfx.bossDown();
+    showBanner('QUEEN BONKED!');
+    game.shake = 0.5;
+  },
+  onHurt: () => {
+    game.shake = 0.3;
+    game.flash = 0.25;
+    if (game.hearts <= 0) endGame(false);
+    else sfx.hurt();
+  },
+};
 
 function updatePlay(dt) {
   const p = game.player;
@@ -217,14 +321,30 @@ function updatePlay(dt) {
   }
 
   const layout = getLayout(zoneKey());
+  if (game.buffs.speed > 0) game.buffs.speed -= dt;
+  if (game.buffs.invuln > 0) game.buffs.invuln -= dt;
+  const speed = PLAYER_SPEED * (game.buffs.speed > 0 ? 1.6 : 1);
   const mv = getMove();
   p.moving = !!(mv.dx || mv.dy);
   if (p.moving) {
-    moveWithCollision(p, mv.dx * PLAYER_SPEED * dt, mv.dy * PLAYER_SPEED * dt, layout, 20);
+    moveWithCollision(p, mv.dx * speed * dt, mv.dy * speed * dt, layout, 20);
     // facing follows the dominant axis
     p.dir = Math.abs(mv.dx) > Math.abs(mv.dy) ? (mv.dx > 0 ? 'right' : 'left') : (mv.dy > 0 ? 'down' : 'up');
+    if (game.buffs.speed > 0) { // zoom trail
+      game.particles.push({ x: p.x, y: p.y + 20, vx: -mv.dx * 60, vy: -mv.dy * 60 - 30, life: 0.3, color: '#ff8a94' });
+    }
+  }
+  if (game.buffs.invuln > 0 && Math.random() < 0.3) { // sparkle aura
+    game.particles.push({
+      x: p.x + (Math.random() - 0.5) * 50, y: p.y + (Math.random() - 0.5) * 60,
+      vx: 0, vy: -50, life: 0.4, color: '#ffe9a8',
+    });
   }
   if (p.hurtT > 0) p.hurtT -= dt;
+
+  // bonk!
+  if (p.swing) { p.swing.t -= dt; if (p.swing.t <= 0) p.swing = null; }
+  if (p.swingCd > 0) p.swingCd -= dt;
   if (game.shake > 0) game.shake -= dt;
   if (game.flash > 0) game.flash -= dt;
 
@@ -240,31 +360,10 @@ function updatePlay(dt) {
     }
   }
 
-  updateEntities(game, dt, {
-    onPickup: () => {
-      sfx.pickup();
-      game.score = game.carried + game.banked;
-      if (game.score >= 15) endGame(true);
-    },
-    onHeal: () => sfx.heal(),
-    onRest: () => sfx.rest(),
-    onBank: n => {
-      sfx.clink();
-      game.wallet += n;
-      localStorage.setItem('pq-wallet', String(game.wallet));
-    },
-    onDropLost: () => {
-      game.score = game.carried + game.banked;
-      sfx.drop();
-    },
-    onHurt: () => {
-      game.shake = 0.3;
-      game.flash = 0.25;
-      if (game.hearts <= 0) endGame(false);
-      else sfx.hurt();
-    },
-  }, layout);
+  updateEntities(game, dt, entityEvents, layout);
   if (state !== 'PLAY') return;
+
+  game.shopOpen = !!(layout.chestZone && rectHas(layout.chestZone, p.x, p.y));
 
   // cave doorways lead underground; ladders lead back up
   if (!game.inCave && layout.caveDoor && rectHas(layout.caveDoor, p.x, p.y)) {
@@ -391,6 +490,7 @@ function drawPlay(t) {
     const layout = getLayout(zoneKey());
     ctx.drawImage(layout.ground, 0, 0);
     drawEntities(ctx, assets, game, t, layout, () => drawPlayer(t));
+    if (game.shopOpen) drawShop(layout);
     if (game.inCave) { // lantern-light darkness around the hero
       const p = game.player;
       const g = ctx.createRadialGradient(p.x, p.y, 130, p.x, p.y, 420);
@@ -450,9 +550,34 @@ function drawPlayer(t) {
   const spr = p.moving ? assets.walk[key][Math.floor(t / 130) % 2] : assets.sprites[key];
   const h = HERO_HEIGHT;
   const w = h * (spr.width / spr.height);
+  if (game.buffs.invuln > 0) { // s'more glow
+    const g = ctx.createRadialGradient(p.x, p.y, 8, p.x, p.y, 64);
+    g.addColorStop(0, 'rgba(255,225,120,0.5)');
+    g.addColorStop(1, 'rgba(255,225,120,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(p.x - 66, p.y - 66, 132, 132);
+  }
   if (p.hurtT > 0 && Math.floor(t / 80) % 2 === 0) ctx.globalAlpha = 0.35; // i-frame blink
   ctx.drawImage(spr, p.x - w / 2, p.y - h / 2, w, h);
+  if (game.hat) {
+    const hat = assets.props['hat-' + game.hat];
+    const hw = 40, hh = hw * (hat.height / hat.width);
+    ctx.drawImage(hat, p.x - hw / 2, p.y - h / 2 - hh + 10, hw, hh);
+  }
   ctx.globalAlpha = 1;
+  if (p.swing) { // bonk swoosh
+    const k = p.swing.t / 0.25;
+    const ang = { right: 0, down: Math.PI / 2, left: Math.PI, up: -Math.PI / 2 }[p.swing.dir];
+    ctx.save();
+    ctx.globalAlpha = k * 0.9;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 10;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 64, ang - 0.9 + (1 - k) * 0.6, ang + 0.9 + (1 - k) * 0.6);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 // Hearts: 6 half-units drawn as 3 pixel-art hearts.
@@ -476,12 +601,72 @@ function drawHeart(x, y, fill, px) {
   }
 }
 
+function drawShop(layout) {
+  shopSlots = [];
+  const cs = layout.chestSpot;
+  const pw = 3 * 130 + 2 * 12 + 28, ph = 172;
+  const x0 = Math.max(12, Math.min(W - pw - 12, cs.x - pw / 2));
+  const y0 = Math.max(84, cs.y - 80 - ph);
+  ctx.fillStyle = 'rgba(10,20,8,0.85)';
+  ctx.fillRect(x0, y0, pw, ph);
+  ctx.strokeStyle = '#ffd84d';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(x0, y0, pw, ph);
+  drawCenterText('HAT SHOP — treasure saved: ' + game.wallet, x0 + pw / 2, y0 + 28, 22, '#ffd84d');
+  HATS.forEach((hat, i) => {
+    const sx = x0 + 14 + i * 142, sy = y0 + 42, sw = 130, sh = 118;
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(sx, sy, sw, sh);
+    if (game.hat === hat.id) {
+      ctx.strokeStyle = '#8aff8a';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(sx, sy, sw, sh);
+    }
+    const img = assets.props['hat-' + hat.id];
+    ctx.drawImage(img, sx + sw / 2 - 33, sy + 8, 66, 48);
+    const label = game.hat === hat.id ? 'Equipped!' : game.hatsOwned.has(hat.id) ? 'Tap to wear' : hat.cost + ' treasure';
+    drawCenterText(hat.name, sx + sw / 2, sy + 82, 20, '#fff');
+    drawCenterText(label, sx + sw / 2, sy + 106, 16, game.hatsOwned.has(hat.id) ? '#8aff8a' : '#ffd84d');
+    shopSlots.push({ x: sx, y: sy, w: sw, h: sh, hat });
+  });
+}
+
 function drawHud() {
   const px = 6;
   for (let i = 0; i < 3; i++) {
     const units = Math.max(0, Math.min(2, game.hearts - i * 2)); // 0, 1 or 2 half-units
     drawHeart(16 + i * (7 * px + 10), 14, units / 2, px);
   }
+  // active buff icons under the hearts
+  let bx = 18;
+  for (const [buff, prop, max] of [['speed', 'berry', 6], ['invuln', 'smore', 5]]) {
+    if (game.buffs[buff] > 0) {
+      const img = assets.props[prop];
+      ctx.drawImage(img, bx, 62, 30, 30 * (img.height / img.width));
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(bx, 94, 30, 5);
+      ctx.fillStyle = '#8aff8a';
+      ctx.fillRect(bx, 94, 30 * Math.min(1, game.buffs[buff] / max), 5);
+      bx += 40;
+    }
+  }
+  // bonk button
+  const bb = bonkBtn();
+  ctx.save();
+  ctx.globalAlpha = game.player.swingCd > 0 ? 0.45 : 0.85;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r - 3, 0, Math.PI * 2); ctx.stroke();
+  ctx.lineWidth = 7;
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r - 22, -2.2, 0.4); ctx.stroke(); // swoosh icon
+  ctx.font = 'bold 17px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.fillText('BONK', bb.x, bb.y + bb.r - 14);
+  ctx.restore();
   // score with coin icon
   const coin = assets.sprites['coin'];
   const ch = 34, cw = ch * (coin.width / coin.height);

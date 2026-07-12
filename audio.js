@@ -153,4 +153,28 @@ export const sfx = {
     if (!ctx) return;
     blip(330, 0.2, ctx.currentTime, 'square', 0.12, 140);
   },
+  bonk() {
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    blip(150, 0.09, t0, 'square', 0.2, 70);
+    blip(900, 0.05, t0, 'square', 0.06, 500);
+  },
+  bossHit() {
+    if (!ctx) return;
+    blip(220, 0.22, ctx.currentTime, 'square', 0.2, 60);
+  },
+  bossDown() {
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    [64, 67, 71, 76, 79].forEach((n, i) => blip(NOTE(n), i === 4 ? 0.5 : 0.14, t0 + i * 0.12, 'square', 0.12));
+  },
+  buff() {
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    [72, 76, 79, 84].forEach((n, i) => blip(NOTE(n), 0.09, t0 + i * 0.07, 'square', 0.09));
+  },
+  buzz() {
+    if (!ctx) return;
+    blip(120, 0.22, ctx.currentTime, 'square', 0.14, 90);
+  },
 };
