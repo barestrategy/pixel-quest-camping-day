@@ -217,12 +217,12 @@ function draw(t) {
     drawPlay(t);
   } else if (state === 'WIN') {
     ctx.drawImage(assets.imgs['screen-win'], 0, 0, W, H);
-    drawCenterText('Best: ' + game.best + ' treasures', W / 2, H * 0.72, 28, '#053305');
-    pulseText('TAP TO PLAY AGAIN', W / 2, H * 0.85, 32, t, '#053305');
+    drawCenterText('Best: ' + game.best + ' treasures', W / 2, H * 0.8, 28, '#053305');
+    pulseText('TAP TO PLAY AGAIN', W / 2, H * 0.9, 32, t, '#053305');
   } else if (state === 'DIED') {
     ctx.drawImage(assets.imgs['screen-died'], 0, 0, W, H);
-    drawCenterText('Treasures found: ' + game.score, W / 2, H * 0.72, 28, '#3a0000');
-    pulseText('TAP TO TRY AGAIN', W / 2, H * 0.85, 32, t, '#3a0000');
+    drawCenterText('Treasures found: ' + game.score, W / 2, H * 0.8, 28, '#3a0000');
+    pulseText('TAP TO TRY AGAIN', W / 2, H * 0.9, 32, t, '#3a0000');
   }
 
   if (state !== 'LOADING') drawMuteButton();
