@@ -38,7 +38,27 @@ const game = {
   zone: { x: 1, y: 1 },
   player: { x: W / 2, y: H / 2 + 60, dir: 'down', moving: false, hurtT: 0 },
   best: Number(localStorage.getItem('pq-best') || 0),
+  banner: { text: '', t: 0 },
+  transition: null,       // { dx, dy, t } while sliding between zones
+  visited: new Set(['1,1']),
 };
+
+window.pq = game; // debug/testing handle
+window.pqDebug = () => ({ state, view: { ...view }, joy: { ...input.joy }, taps: input.taps.length });
+
+const TRANSITION_TIME = 0.45;
+const EDGE = 8;           // how close to the edge triggers a zone change
+
+function zoneKey() { return game.zone.x + ',' + game.zone.y; }
+
+function showBanner(text) {
+  game.banner.text = text;
+  game.banner.t = 2.2;
+}
+
+function startTransition(dx, dy) {
+  game.transition = { dx, dy, t: 0 };
+}
 
 function setState(s) {
   state = s;
@@ -54,6 +74,9 @@ function startGame(hero) {
   game.player.y = H / 2 + 60;
   game.player.dir = 'down';
   game.player.hurtT = 0;
+  game.transition = null;
+  game.visited = new Set(['1,1']);
+  showBanner(ZONE_RECIPES['1,1'].name);
   setState('PLAY');
 }
 
@@ -80,6 +103,25 @@ function update(dt) {
 
 function updatePlay(dt) {
   const p = game.player;
+  if (game.banner.t > 0) game.banner.t -= dt;
+
+  if (game.transition) {
+    const tr = game.transition;
+    tr.t += dt;
+    if (tr.t >= TRANSITION_TIME) {
+      game.zone.x += tr.dx;
+      game.zone.y += tr.dy;
+      game.transition = null;
+      // enter from the opposite edge
+      if (tr.dx === 1) p.x = PLAYER_RADIUS + EDGE;
+      if (tr.dx === -1) p.x = W - PLAYER_RADIUS - EDGE;
+      if (tr.dy === 1) p.y = PLAYER_RADIUS + EDGE;
+      if (tr.dy === -1) p.y = H - PLAYER_RADIUS - EDGE;
+      onZoneEnter();
+    }
+    return; // world frozen while sliding
+  }
+
   const mv = getMove();
   p.moving = !!(mv.dx || mv.dy);
   if (p.moving) {
@@ -89,9 +131,19 @@ function updatePlay(dt) {
     p.dir = Math.abs(mv.dx) > Math.abs(mv.dy) ? (mv.dx > 0 ? 'right' : 'left') : (mv.dy > 0 ? 'down' : 'up');
   }
   if (p.hurtT > 0) p.hurtT -= dt;
-  // Phase 1: clamp to the screen. Zone transitions arrive in Phase 2.
+
+  // walk off an edge -> slide to the neighboring zone (if there is one)
+  if (p.x < PLAYER_RADIUS && game.zone.x > 0) return startTransition(-1, 0);
+  if (p.x > W - PLAYER_RADIUS && game.zone.x < 2) return startTransition(1, 0);
+  if (p.y < PLAYER_RADIUS && game.zone.y > 0) return startTransition(0, -1);
+  if (p.y > H - PLAYER_RADIUS && game.zone.y < 2) return startTransition(0, 1);
   p.x = Math.max(PLAYER_RADIUS, Math.min(W - PLAYER_RADIUS, p.x));
   p.y = Math.max(PLAYER_RADIUS, Math.min(H - PLAYER_RADIUS, p.y));
+}
+
+function onZoneEnter() {
+  game.visited.add(zoneKey());
+  showBanner(ZONE_RECIPES[zoneKey()].name);
 }
 
 // ---------- draw ----------
@@ -129,10 +181,45 @@ function draw(t) {
 }
 
 function drawPlay(t) {
-  const zoneKey = game.zone.x + ',' + game.zone.y;
-  ctx.drawImage(assets.zones[zoneKey], 0, 0);
-  drawPlayer(t);
+  if (game.transition) {
+    // slide the old zone out and the new one in
+    const tr = game.transition;
+    const k = Math.min(1, tr.t / TRANSITION_TIME);
+    const e = k * k * (3 - 2 * k); // smoothstep
+    const nx = game.zone.x + tr.dx, ny = game.zone.y + tr.dy;
+    ctx.drawImage(assets.zones[zoneKey()], -tr.dx * e * W, -tr.dy * e * H);
+    ctx.drawImage(assets.zones[nx + ',' + ny], tr.dx * W - tr.dx * e * W, tr.dy * H - tr.dy * e * H);
+  } else {
+    ctx.drawImage(assets.zones[zoneKey()], 0, 0);
+    drawPlayer(t);
+  }
   drawHud();
+  drawBanner();
+}
+
+function drawBanner() {
+  if (game.banner.t <= 0) return;
+  const a = Math.min(1, game.banner.t / 0.5); // fade out over the last half second
+  ctx.save();
+  ctx.globalAlpha = a;
+  drawCenterText(game.banner.text, W / 2, 100, 40, '#ffe9a8');
+  ctx.restore();
+}
+
+function drawMinimap() {
+  const cell = 16, gap = 3, pad = 6;
+  const mw = 3 * cell + 2 * gap + pad * 2;
+  const x0 = W / 2 - mw / 2, y0 = 12;
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(x0, y0, mw, mw);
+  for (let zy = 0; zy < 3; zy++) {
+    for (let zx = 0; zx < 3; zx++) {
+      const key = zx + ',' + zy;
+      const cur = zx === game.zone.x && zy === game.zone.y;
+      ctx.fillStyle = cur ? '#ffe14d' : game.visited.has(key) ? 'rgba(180,230,140,0.9)' : 'rgba(255,255,255,0.25)';
+      ctx.fillRect(x0 + pad + zx * (cell + gap), y0 + pad + zy * (cell + gap), cell, cell);
+    }
+  }
 }
 
 function drawPlayer(t) {
@@ -185,6 +272,7 @@ function drawHud() {
   const scoreText = game.score + '/15';
   ctx.strokeText(scoreText, W - 150 + cw + 8, 12 + ch - 8);
   ctx.fillText(scoreText, W - 150 + cw + 8, 12 + ch - 8);
+  drawMinimap();
 }
 
 function drawHeroCard(hero, cx, t) {
