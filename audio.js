@@ -132,4 +132,25 @@ export const sfx = {
     const t0 = ctx.currentTime;
     [57, 53, 50, 45].forEach((n, i) => blip(NOTE(n), 0.28, t0 + i * 0.24, 'triangle', 0.2));
   },
+  heal() {
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    blip(660, 0.1, t0, 'triangle', 0.16);
+    blip(990, 0.16, t0 + 0.09, 'triangle', 0.16);
+  },
+  rest() {
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    [72, 67, 64, 60].forEach((n, i) => blip(NOTE(n), 0.3, t0 + i * 0.18, 'triangle', 0.14));
+  },
+  clink() {
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    blip(1320, 0.06, t0, 'square', 0.08);
+    blip(1760, 0.09, t0 + 0.07, 'square', 0.08);
+  },
+  drop() {
+    if (!ctx) return;
+    blip(330, 0.2, ctx.currentTime, 'square', 0.12, 140);
+  },
 };

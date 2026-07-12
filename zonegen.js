@@ -325,9 +325,17 @@ export function buildZoneLayout(key, assets) {
     addProp(L, P['sign-go'], W * 0.17 + 95, H * 0.26, 46, { solid: false });
     addProp(L, P['well'], W * 0.46, H * 0.44, 88, { bw: 0.8, bh: 0.4 });
     addProp(L, P['pine-big'], W * 0.3, H * 0.3, 165);
-    L.chestSpot = { x: W * 0.35, y: H * 0.66 };   // chest becomes interactive in Phase D
-    L.firePit = { x: W * 0.27, y: H * 0.74 };     // tent + bonfire land here in Phase D
-    addProp(L, P['chest'], L.chestSpot.x, L.chestSpot.y, 54, { bw: 0.9, bh: 0.3 });
+    // home sweet home: tent (walk in to rest), bonfire, treasure chest
+    const tent = addProp(L, P['tent'], W * 0.28, H * 0.82, 140, { bw: 0.8, bh: 0.3 });
+    L.tentDoor = { x: tent.x + tent.w * 0.34, y: tent.y + tent.h * 0.6, w: tent.w * 0.32, h: tent.h * 0.46 };
+    L.colliders.pop(); // the door replaces the tent's solid box; re-add side walls
+    L.colliders.push({ x: tent.x, y: tent.y + tent.h * 0.55, w: tent.w * 0.3, h: tent.h * 0.4 });
+    L.colliders.push({ x: tent.x + tent.w * 0.7, y: tent.y + tent.h * 0.55, w: tent.w * 0.3, h: tent.h * 0.4 });
+    L.firePit = { x: W * 0.28 + 130, y: H * 0.82 - 10 };
+    L.colliders.push({ x: L.firePit.x - 22, y: L.firePit.y - 12, w: 44, h: 22 });
+    L.chestSpot = { x: W * 0.42, y: H * 0.76 };
+    const chest = addProp(L, P['chest'], L.chestSpot.x, L.chestSpot.y, 54, { bw: 0.9, bh: 0.3 });
+    L.chestZone = { x: chest.x - 24, y: chest.y - 20, w: chest.w + 48, h: chest.h + 44 };
     addProp(L, P['sign-post'], W * 0.6, H * 0.72, 46, { solid: false });
     scatter(L, rng, [P['tree1'], P['tree2'], P['tree3']], 3, 80, 110);
   } else if (def.type === 'battlefield') {

@@ -66,7 +66,10 @@ let stateTime = 0;
 
 const game = {
   hero: 'pixely',
-  score: 0,
+  score: 0,               // total this run = carried + banked; 15 wins
+  carried: 0,             // loose treasure — an ant hit knocks one out
+  banked: 0,              // safe in the campsite chest
+  wallet: Number(localStorage.getItem('pq-wallet') || 0), // lifetime, for the shop
   hearts: 6,              // half-heart units; 6 = three full hearts
   zone: { x: 1, y: 1 },
   player: { x: W / 2, y: H / 2 + 60, dir: 'down', moving: false, hurtT: 0 },
@@ -113,6 +116,9 @@ function setState(s) {
 function startGame(hero) {
   game.hero = hero;
   game.score = 0;
+  game.carried = 0;
+  game.banked = 0;
+  game.rested = false;
   game.hearts = 6;
   game.zone = { x: 1, y: 1 };
   game.player.x = W / 2;
@@ -237,7 +243,19 @@ function updatePlay(dt) {
   updateEntities(game, dt, {
     onPickup: () => {
       sfx.pickup();
+      game.score = game.carried + game.banked;
       if (game.score >= 15) endGame(true);
+    },
+    onHeal: () => sfx.heal(),
+    onRest: () => sfx.rest(),
+    onBank: n => {
+      sfx.clink();
+      game.wallet += n;
+      localStorage.setItem('pq-wallet', String(game.wallet));
+    },
+    onDropLost: () => {
+      game.score = game.carried + game.banked;
+      sfx.drop();
     },
     onHurt: () => {
       game.shake = 0.3;
@@ -476,6 +494,15 @@ function drawHud() {
   const scoreText = game.score + '/15';
   ctx.strokeText(scoreText, W - 150 + cw + 8, 12 + ch - 8);
   ctx.fillText(scoreText, W - 150 + cw + 8, 12 + ch - 8);
+  // banked treasure marker
+  if (game.banked > 0) {
+    const chest = assets.props['chest'];
+    const chH = 26, chW = chH * (chest.width / chest.height);
+    ctx.drawImage(chest, W - 150, 50, chW, chH);
+    ctx.font = 'bold 22px "Courier New", monospace';
+    ctx.strokeText('x' + game.banked, W - 150 + chW + 6, 70);
+    ctx.fillText('x' + game.banked, W - 150 + chW + 6, 70);
+  }
   drawMinimap();
 }
 

@@ -20,6 +20,7 @@ const ANT_COUNTS = { '0,0': 2, '1,0': 1, '2,0': 3, '0,1': 1, '2,1': 2, '0,2': 3,
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const keyOf = g => g.inCave ? 'U' : g.zone.x + ',' + g.zone.y;
+const rectHas = (r, x, y) => x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h;
 
 // Current collectible type from the score, exactly like the Scratch tiers.
 export function itemType(score) {
@@ -70,22 +71,74 @@ export function updateEntities(game, dt, events, layout) {
   const key = keyOf(game);
   const p = game.player;
 
-  // collectibles in this zone
+  // collectibles (and heart pickups) in this zone
   for (const item of game.items) {
     if (item.zone !== key || !item.placed) continue;
     if (Math.hypot(item.x - p.x, item.y - p.y) < ITEM_RADIUS + 26) {
-      game.score++;
-      events.onPickup(item.x, item.y);
-      burst(game, item.x, item.y, '#ffd94d', 12);
-      game.floats.push({ x: item.x, y: item.y - 20, text: '+1', life: 0.9 });
-      // the treasure pops away to a random spot in a random outer zone
+      if (item.kind === 'heart') {
+        if (game.hearts >= 6) continue; // full health: leave it for later
+        game.hearts = Math.min(6, game.hearts + 2);
+        events.onHeal();
+        burst(game, item.x, item.y, '#ff6b8a', 12);
+        game.floats.push({ x: item.x, y: item.y - 20, text: '+♥', life: 0.9 });
+      } else {
+        game.carried++;
+        events.onPickup();
+        burst(game, item.x, item.y, '#ffd94d', 12);
+        game.floats.push({ x: item.x, y: item.y - 20, text: '+1', life: 0.9 });
+      }
+      // pops away to a random spot in a random outer zone, sometimes as a heart
       item.zone = OUTER_ZONES[Math.floor(Math.random() * OUTER_ZONES.length)];
       item.placed = false;
+      const heartsActive = game.items.filter(i => i.kind === 'heart' && i !== item).length;
+      item.kind = heartsActive < 2 && Math.random() < 0.12 ? 'heart' : 'treasure';
       if (item.zone === key) {
         const pos = randomOpenSpot(layout, 50, p, 200);
         item.x = pos.x; item.y = pos.y; item.placed = true;
       }
     }
+  }
+
+  // dropped treasures: arc out, settle, then can be scooped back up
+  for (const dr of game.drops) {
+    dr.age += dt;
+    if (!dr.settled) {
+      dr.x += dr.vx * dt; dr.y += dr.vy * dt;
+      dr.vy += 700 * dt;
+      dr.x = Math.max(40, Math.min(W - 40, dr.x));
+      dr.y = Math.max(80, Math.min(H - 40, dr.y));
+      if (dr.vy > 0 && dr.age > 0.35) dr.settled = true;
+    } else if (dr.age > 0.8 && Math.hypot(dr.x - p.x, dr.y - p.y) < 42) {
+      dr.collected = true;
+      game.carried++;
+      events.onPickup();
+      burst(game, dr.x, dr.y, '#ffd94d', 8);
+      game.floats.push({ x: dr.x, y: dr.y - 20, text: '+1', life: 0.9 });
+    }
+  }
+  game.drops = game.drops.filter(dr => !dr.collected);
+
+  // tent: step inside to rest up
+  if (layout.tentDoor && rectHas(layout.tentDoor, p.x, p.y)) {
+    if (game.hearts < 6 && !game.rested) {
+      game.hearts = 6;
+      game.rested = true;
+      events.onRest();
+      burst(game, p.x, p.y - 30, '#ffe9a8', 14);
+      game.floats.push({ x: p.x, y: p.y - 50, text: 'All rested!', life: 1.4 });
+    }
+  } else {
+    game.rested = false;
+  }
+
+  // treasure chest: bank what you carry
+  if (layout.chestZone && rectHas(layout.chestZone, p.x, p.y) && game.carried > 0) {
+    const n = game.carried;
+    game.banked += n;
+    game.carried = 0;
+    events.onBank(n);
+    burst(game, layout.chestSpot.x, layout.chestSpot.y - 20, '#ffd94d', 10);
+    game.floats.push({ x: layout.chestSpot.x, y: layout.chestSpot.y - 44, text: '+' + n + ' stored!', life: 1.4 });
   }
 
   // ants
@@ -116,6 +169,15 @@ export function updateEntities(game, dt, events, layout) {
     if (p.hurtT <= 0 && dist < size / 2 + 22) {
       game.hearts--;
       p.hurtT = 1;
+      if (game.carried > 0) { // one carried treasure pops loose
+        game.carried--;
+        game.drops.push({
+          x: p.x, y: p.y - 10,
+          vx: rand(-150, 150), vy: rand(-280, -180),
+          type: itemType(game.score), age: 0, settled: false,
+        });
+        events.onDropLost();
+      }
       // knockback away from the ant (skip if a wall is in the way)
       const ka = dist > 4 ? Math.atan2(-dy, -dx) : rand(0, Math.PI * 2);
       for (const kd of [80, 40]) {
@@ -178,8 +240,16 @@ export function drawEntities(ctx, assets, game, t, layout, drawPlayerFn) {
     drawables.push({ baseY: item.y + 22, draw: () => drawItem(ctx, assets, game, item, t) });
   }
 
+  for (const dr of game.drops) {
+    drawables.push({ baseY: dr.y + 18, draw: () => drawDrop(ctx, assets, dr, t) });
+  }
+
   for (const a of game.ants) {
     drawables.push({ baseY: a.y + (a.queen ? QUEEN_SIZE : ANT_SIZE) / 2, draw: () => drawAnt(ctx, assets, a, t) });
+  }
+
+  if (layout.firePit) {
+    drawables.push({ baseY: layout.firePit.y + 12, draw: () => drawFire(ctx, assets, game, layout.firePit, t) });
   }
 
   drawables.push({ baseY: game.player.y + 38, draw: drawPlayerFn });
@@ -208,10 +278,69 @@ export function drawEntities(ctx, assets, game, t, layout, drawPlayerFn) {
   }
 }
 
+const HEART_BMP = ['0110110', '1111111', '1111111', '0111110', '0011100', '0001000'];
+
+function drawHeartAt(ctx, cx, cy, px) {
+  for (let r = 0; r < HEART_BMP.length; r++) {
+    for (let c = 0; c < 7; c++) {
+      if (HEART_BMP[r][c] === '1') {
+        ctx.fillStyle = '#e8302a';
+        ctx.fillRect(cx + (c - 3.5) * px, cy + (r - 3) * px, px, px);
+      }
+    }
+  }
+  ctx.fillStyle = '#ff9aa8'; // glint
+  ctx.fillRect(cx - 2 * px, cy - 2 * px, px, px);
+}
+
+function drawDrop(ctx, assets, dr, t) {
+  const spr = assets.sprites[dr.type];
+  const h = 38, w = h * (spr.width / spr.height);
+  const blink = dr.age < 0.8 && Math.floor(t / 90) % 2 === 0;
+  if (blink) ctx.globalAlpha = 0.5;
+  ctx.drawImage(spr, dr.x - w / 2, dr.y - h / 2, w, h);
+  ctx.globalAlpha = 1;
+}
+
+function drawFire(ctx, assets, game, fp, t) {
+  // glow
+  const g = ctx.createRadialGradient(fp.x, fp.y - 10, 8, fp.x, fp.y - 10, 95 + Math.sin(t * 0.013) * 10);
+  g.addColorStop(0, 'rgba(255,160,60,0.30)');
+  g.addColorStop(1, 'rgba(255,160,60,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(fp.x - 110, fp.y - 120, 220, 220);
+  ctx.drawImage(assets.props['logs'], fp.x - 28, fp.y - 15, 56, 30);
+  const h = 32 + Math.sin(t * 0.019) * 5 + Math.sin(t * 0.043) * 4;
+  flame(ctx, fp.x, fp.y - 6, h, '#ff5a1f');
+  flame(ctx, fp.x + Math.sin(t * 0.03) * 2, fp.y - 6, h * 0.68, '#ff9a2b');
+  flame(ctx, fp.x, fp.y - 6, h * 0.4, '#ffd84d');
+  if (Math.random() < 0.1) {
+    game.particles.push({
+      x: fp.x + (Math.random() - 0.5) * 18, y: fp.y - 22,
+      vx: (Math.random() - 0.5) * 24, vy: -95, life: 0.55, color: '#ffb454',
+    });
+  }
+}
+
+function flame(ctx, x, y, h, col) {
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.moveTo(x - h * 0.38, y);
+  ctx.quadraticCurveTo(x - h * 0.3, y - h * 0.55, x, y - h);
+  ctx.quadraticCurveTo(x + h * 0.3, y - h * 0.55, x + h * 0.38, y);
+  ctx.closePath();
+  ctx.fill();
+}
+
 function drawItem(ctx, assets, game, item, t) {
+  const bob0 = Math.sin(t * 0.004 + item.x) * 5;
+  if (item.kind === 'heart') {
+    drawHeartAt(ctx, item.x, item.y + bob0, 5);
+    return;
+  }
   const spr = assets.sprites[itemType(game.score)];
   const h = 46, w = h * (spr.width / spr.height);
-  const bob = Math.sin(t * 0.004 + item.x) * 5;
+  const bob = bob0;
   ctx.drawImage(spr, item.x - w / 2, item.y - h / 2 + bob, w, h);
   const sp = (t * 0.003 + item.x * 0.1) % 1;
   if (sp < 0.35) {

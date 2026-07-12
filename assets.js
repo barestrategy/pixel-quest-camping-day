@@ -190,6 +190,39 @@ function sampleColor(img) {
   return `rgb(${d[0]},${d[1]},${d[2]})`;
 }
 
+// The kids' art has no tent or campfire — these two are drawn to match.
+function makeTent() {
+  const c = document.createElement('canvas');
+  c.width = 140; c.height = 110;
+  const x = c.getContext('2d');
+  x.fillStyle = '#e06a24';
+  x.beginPath(); x.moveTo(70, 4); x.lineTo(134, 102); x.lineTo(6, 102); x.closePath(); x.fill();
+  x.fillStyle = '#c2531a'; // right-side shading
+  x.beginPath(); x.moveTo(70, 4); x.lineTo(134, 102); x.lineTo(70, 102); x.closePath(); x.fill();
+  x.strokeStyle = '#5c2508'; x.lineWidth = 5; x.lineJoin = 'round';
+  x.beginPath(); x.moveTo(70, 4); x.lineTo(134, 102); x.lineTo(6, 102); x.closePath(); x.stroke();
+  x.fillStyle = '#2b1608'; // door
+  x.beginPath(); x.moveTo(70, 32); x.lineTo(94, 102); x.lineTo(46, 102); x.closePath(); x.fill();
+  x.strokeStyle = '#ffd84d'; x.lineWidth = 3; // trim
+  x.beginPath(); x.moveTo(70, 32); x.lineTo(94, 102); x.moveTo(70, 32); x.lineTo(46, 102); x.stroke();
+  return c;
+}
+
+function makeLogs() {
+  const c = document.createElement('canvas');
+  c.width = 56; c.height = 30;
+  const x = c.getContext('2d');
+  x.strokeStyle = '#6b4a26'; x.lineWidth = 8; x.lineCap = 'round';
+  x.beginPath(); x.moveTo(10, 20); x.lineTo(46, 13); x.stroke();
+  x.strokeStyle = '#57381b';
+  x.beginPath(); x.moveTo(10, 11); x.lineTo(46, 21); x.stroke();
+  x.fillStyle = '#8f8b80'; // stone ring
+  [[5, 24], [17, 27], [30, 28], [43, 26], [51, 22]].forEach(([sx, sy]) => {
+    x.beginPath(); x.arc(sx, sy, 4.5, 0, 7); x.fill();
+  });
+  return c;
+}
+
 function cloneCanvas(c) {
   const out = document.createElement('canvas');
   out.width = c.width; out.height = c.height;
@@ -218,6 +251,8 @@ export async function loadAssets() {
     props[n + '-dark'] = applyColorFilter(cloneCanvas(props[n]), { bright: 0.68 });
     props[n + '-autumn'] = applyColorFilter(cloneCanvas(props[n]), { hue: -45, sat: 1.15 });
   }
+  props['tent'] = makeTent();
+  props['logs'] = makeLogs();
   props['grass1-dark'] = applyColorFilter(cloneCanvas(props['grass1']), { bright: 0.78 });
   props['grass1-sunny'] = applyColorFilter(cloneCanvas(props['grass1']), { hue: -10, bright: 1.12 });
   props['grass2-autumn'] = applyColorFilter(cloneCanvas(props['grass2']), { hue: -30, sat: 1.05 });
