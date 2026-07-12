@@ -1,10 +1,11 @@
 // Pixel Quest Camping Day — main loop and state machine.
-import { W, H, loadAssets, ZONE_RECIPES } from './assets.js';
+import { W, H, setWorldWidth, rebuildZones, loadAssets, ZONE_RECIPES } from './assets.js';
 import { input, initInput, getMove, takeTap, clearFrameFlags, drawJoystick } from './input.js';
 import { initItems, enterZone, updateEntities, drawEntities } from './entities.js';
 import { unlock, setTheme, sfx, toggleMute, isMuted } from './audio.js';
 
-const MUTE_BTN = { x: W - 64, y: H - 64, r: 30 };
+const muteBtn = () => ({ x: W - 64, y: H - 64, r: 30 });
+const startBtnRect = () => ({ x: W / 2 - 150, y: H - 165, w: 300, h: 105 });
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -14,11 +15,21 @@ const PLAYER_SPEED = 220;     // world px / s
 const PLAYER_RADIUS = 24;     // collision radius
 
 const view = { scale: 1, ox: 0, oy: 0, dpr: 1 };
+let assets = null;
 
 function resize() {
   view.dpr = Math.min(devicePixelRatio || 1, 3);
   canvas.width = Math.round(innerWidth * view.dpr);
   canvas.height = Math.round(innerHeight * view.dpr);
+  // world width follows the screen aspect so play fills the whole display
+  if (assets) {
+    const targetW = Math.max(560, Math.min(1680, Math.round(H * innerWidth / innerHeight)));
+    if (Math.abs(targetW - W) / W > 0.05) {
+      setWorldWidth(targetW);
+      rebuildZones(assets);
+      clampToWorld();
+    }
+  }
   view.scale = Math.min(innerWidth / W, innerHeight / H);
   view.ox = (innerWidth - W * view.scale) / 2;
   view.oy = (innerHeight - H * view.scale) / 2;
@@ -26,12 +37,18 @@ function resize() {
 addEventListener('resize', resize);
 resize();
 
+function clampToWorld() {
+  if (!game.player) return;
+  game.player.x = Math.max(30, Math.min(W - 30, game.player.x));
+  for (const a of game.ants || []) a.x = Math.max(30, Math.min(W - 30, a.x));
+  for (const it of game.items || []) it.x = Math.max(60, Math.min(W - 60, it.x));
+}
+
 // screen (CSS px) -> world coords
 function toWorld(sx, sy) {
   return { x: (sx - view.ox) / view.scale, y: (sy - view.oy) / view.scale };
 }
 
-let assets = null;
 let state = 'LOADING';
 let stateTime = 0;
 
@@ -42,6 +59,7 @@ const game = {
   zone: { x: 1, y: 1 },
   player: { x: W / 2, y: H / 2 + 60, dir: 'down', moving: false, hurtT: 0 },
   best: Number(localStorage.getItem('pq-best') || 0),
+  select: { chosen: null },
   banner: { text: '', t: 0 },
   transition: null,       // { dx, dy, t } while sliding between zones
   visited: new Set(['1,1']),
@@ -110,18 +128,28 @@ function update(dt) {
   // mute button works in every state
   if (tap) {
     const w = toWorld(tap.x, tap.y);
-    if (Math.hypot(w.x - MUTE_BTN.x, w.y - MUTE_BTN.y) < MUTE_BTN.r + 10) {
+    const mb = muteBtn();
+    if (Math.hypot(w.x - mb.x, w.y - mb.y) < mb.r + 10) {
       toggleMute();
       tap = null;
     }
   }
 
   if (state === 'TITLE') {
-    if (tap) setState('SELECT');
+    if (tap) {
+      game.select.chosen = null;
+      setState('SELECT');
+    }
   } else if (state === 'SELECT') {
     if (tap) {
       const w = toWorld(tap.x, tap.y);
-      startGame(w.x < W / 2 ? 'pixely' : 'emily');
+      const b = startBtnRect();
+      if (game.select.chosen && w.x > b.x && w.x < b.x + b.w && w.y > b.y && w.y < b.y + b.h) {
+        startGame(game.select.chosen);
+      } else if (w.y > H * 0.16) {
+        game.select.chosen = w.x < W / 2 ? 'pixely' : 'emily';
+        sfx.pickup();
+      }
     }
   } else if (state === 'PLAY') {
     updatePlay(dt);
@@ -163,6 +191,18 @@ function updatePlay(dt) {
   if (p.hurtT > 0) p.hurtT -= dt;
   if (game.shake > 0) game.shake -= dt;
   if (game.flash > 0) game.flash -= dt;
+
+  // footstep dust
+  if (p.moving) {
+    p.dustT = (p.dustT || 0) - dt;
+    if (p.dustT <= 0) {
+      p.dustT = 0.16;
+      game.particles.push({
+        x: p.x + (Math.random() - 0.5) * 12, y: p.y + HERO_HEIGHT / 2 - 8,
+        vx: (Math.random() - 0.5) * 30, vy: -25, life: 0.35, color: '#cbbb96',
+      });
+    }
+  }
 
   updateEntities(game, dt, {
     onPickup: () => {
@@ -206,21 +246,19 @@ function draw(t) {
   if (state === 'LOADING') {
     drawCenterText('Loading…', W / 2, H / 2, 36, '#cfe8b0');
   } else if (state === 'TITLE') {
-    ctx.drawImage(assets.imgs['screen-title'], 0, 0, W, H);
+    drawMenuScreen('screen-title');
     pulseText('TAP TO START', W / 2, H * 0.72, 40, t);
     drawCenterText('A game by the Pixel Quest kids', W / 2, H - 30, 20, 'rgba(255,255,255,0.75)');
   } else if (state === 'SELECT') {
-    ctx.drawImage(assets.imgs['hero-select'], 0, 0, W, H);
-    drawHeroCard('pixely', W * 0.25, t);
-    drawHeroCard('emily', W * 0.75, t);
+    drawSelect(t);
   } else if (state === 'PLAY') {
     drawPlay(t);
   } else if (state === 'WIN') {
-    ctx.drawImage(assets.imgs['screen-win'], 0, 0, W, H);
+    drawMenuScreen('screen-win');
     drawCenterText('Best: ' + game.best + ' treasures', W / 2, H * 0.8, 28, '#053305');
     pulseText('TAP TO PLAY AGAIN', W / 2, H * 0.9, 32, t, '#053305');
   } else if (state === 'DIED') {
-    ctx.drawImage(assets.imgs['screen-died'], 0, 0, W, H);
+    drawMenuScreen('screen-died');
     drawCenterText('Treasures found: ' + game.score, W / 2, H * 0.8, 28, '#3a0000');
     pulseText('TAP TO TRY AGAIN', W / 2, H * 0.9, 32, t, '#3a0000');
   }
@@ -230,7 +268,7 @@ function draw(t) {
 }
 
 function drawMuteButton() {
-  const { x, y, r } = MUTE_BTN;
+  const { x, y, r } = muteBtn();
   ctx.save();
   ctx.globalAlpha = 0.8;
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
@@ -306,12 +344,12 @@ function drawMinimap() {
 
 function drawPlayer(t) {
   const p = game.player;
-  const spr = assets.sprites[game.hero + '-' + p.dir];
+  const key = game.hero + '-' + p.dir;
+  const spr = p.moving ? assets.walk[key][Math.floor(t / 130) % 2] : assets.sprites[key];
   const h = HERO_HEIGHT;
   const w = h * (spr.width / spr.height);
-  const bob = p.moving ? Math.sin(t * 0.014) * 3 : 0;
   if (p.hurtT > 0 && Math.floor(t / 80) % 2 === 0) ctx.globalAlpha = 0.35; // i-frame blink
-  ctx.drawImage(spr, p.x - w / 2, p.y - h / 2 + bob, w, h);
+  ctx.drawImage(spr, p.x - w / 2, p.y - h / 2, w, h);
   ctx.globalAlpha = 1;
 }
 
@@ -357,11 +395,79 @@ function drawHud() {
   drawMinimap();
 }
 
-function drawHeroCard(hero, cx, t) {
-  const spr = assets.sprites[hero + '-down'];
-  const h = 260 + Math.sin(t * 0.004 + (hero === 'emily' ? 2 : 0)) * 8;
-  const w = h * (spr.width / spr.height);
-  ctx.drawImage(spr, cx - w / 2, H * 0.55 - h / 2, w, h);
+// Menu art has flat backgrounds: extend the color edge-to-edge, contain-fit the art.
+function drawMenuScreen(key) {
+  ctx.fillStyle = assets.menuBg[key];
+  ctx.fillRect(0, 0, W, H);
+  const img = assets.imgs[key];
+  const s = Math.min(W / img.naturalWidth, H / img.naturalHeight);
+  const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
+  ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+}
+
+function drawSelect(t) {
+  const chosen = game.select.chosen;
+  const strip = H * 0.14;
+  // kids' select-screen palette: bright green split panels, black divider, white title strip
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, strip);
+  ctx.fillStyle = '#04e360';
+  ctx.fillRect(0, strip + 8, W / 2 - 12, H);
+  ctx.fillStyle = '#04f04c';
+  ctx.fillRect(W / 2 + 12, strip + 8, W / 2 - 12, H);
+  drawCenterText('Choose Your Character!', W / 2, strip * 0.68, Math.min(48, W * 0.045), '#111');
+
+  for (const [hero, label, cx] of [['pixely', 'Pixely', W * 0.25], ['emily', 'Emily', W * 0.75]]) {
+    const spr = assets.sprites[hero + '-down'];
+    const isChosen = chosen === hero;
+    const h = isChosen ? 200 : 165;
+    const w = h * (spr.width / spr.height);
+    const cy = H * 0.52;
+    if (isChosen) { // soft highlight pad under the chosen camper
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + h / 2 + 8, w * 0.9, 18, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.drawImage(spr, cx - w / 2, cy - h / 2, w, h);
+    // name chip
+    ctx.fillStyle = '#fff';
+    const chipW = 150, chipY = strip + 24;
+    ctx.fillRect(cx - chipW / 2, chipY, chipW, 42);
+    drawCenterText(label, cx, chipY + 31, 28, '#111');
+    if (isChosen) drawSpeechBubble(`Hi! I'm ${label}!`, cx, cy - h / 2 - 30);
+  }
+
+  if (chosen) {
+    const b = startBtnRect();
+    const spr = assets.sprites['start-button'];
+    const pulse = 1 + Math.sin(t * 0.006) * 0.03;
+    const bw = b.w * pulse, bh = b.h * pulse;
+    ctx.drawImage(spr, b.x + b.w / 2 - bw / 2, b.y + b.h / 2 - bh / 2, bw, bh);
+  } else {
+    pulseText('Tap a camper!', W / 2, H - 60, 30, t, '#fff');
+  }
+}
+
+function drawSpeechBubble(text, cx, cy) {
+  ctx.font = 'bold 26px "Courier New", monospace';
+  const bw = ctx.measureText(text).width + 44;
+  const bh = 56;
+  const x = Math.max(10, Math.min(W - bw - 10, cx - bw / 2));
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#111';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.roundRect(x, cy - bh, bw, bh, 12);
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath(); // tail
+  ctx.moveTo(cx - 10, cy - 3); ctx.lineTo(cx + 12, cy - 3); ctx.lineTo(cx, cy + 16); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#111';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, x + bw / 2, cy - bh / 2 + 9);
 }
 
 function drawCenterText(text, x, y, size, color = '#fff') {
@@ -400,6 +506,7 @@ function loop(t) {
 
 loadAssets().then(a => {
   assets = a;
+  resize(); // adopt the real screen aspect now that zones can rebuild
   setState('TITLE');
 }).catch(err => {
   console.error(err);

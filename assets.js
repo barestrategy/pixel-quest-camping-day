@@ -1,18 +1,30 @@
-// Asset loading, sprite trimming, and zone-background remixing.
-export const W = 960, H = 720;
+// Asset loading, sprite trimming, walk-frame generation, and zone building.
+// World height is fixed; width follows the screen aspect so the game always
+// fills the display (no letterbox bars).
+export const H = 720;
+export let W = 960;
+
+export function setWorldWidth(w) {
+  W = Math.max(560, Math.min(1680, Math.round(w)));
+}
 
 const IMAGE_NAMES = [
   'pixely-up', 'pixely-down', 'pixely-left', 'pixely-right',
   'emily-up', 'emily-down', 'emily-left', 'emily-right',
   'queen-ant', 'coin', 'gem', 'mushroom',
   'bg-campsite', 'bg-battlefield',
-  'screen-title', 'screen-died', 'screen-win', 'hero-select',
+  'screen-title', 'screen-died', 'screen-win', 'start-button',
 ];
 
 const SPRITE_NAMES = [
   'pixely-up', 'pixely-down', 'pixely-left', 'pixely-right',
   'emily-up', 'emily-down', 'emily-left', 'emily-right',
-  'queen-ant', 'coin', 'gem', 'mushroom',
+  'queen-ant', 'coin', 'gem', 'mushroom', 'start-button',
+];
+
+const HERO_DIR_NAMES = [
+  'pixely-up', 'pixely-down', 'pixely-left', 'pixely-right',
+  'emily-up', 'emily-down', 'emily-left', 'emily-right',
 ];
 
 // How each of the 9 zones is built from the kids' two backdrops.
@@ -101,18 +113,53 @@ function applyColorFilter(canvas, { hue = 0, bright = 1, sat = 1 }) {
   return canvas;
 }
 
+// Cover-draw: fill the whole W x H canvas, cropping source overflow.
 function buildZone(imgs, recipe) {
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
   const ctx = c.getContext('2d');
   ctx.imageSmoothingEnabled = false;
+  const img = imgs[recipe.src];
+  const s = Math.max(W / img.naturalWidth, H / img.naturalHeight);
+  const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
   if (recipe.mirror) {
     ctx.translate(W, 0);
     ctx.scale(-1, 1);
   }
-  ctx.drawImage(imgs[recipe.src], 0, 0, W, H);
+  ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   return applyColorFilter(c, recipe);
+}
+
+// Two-frame walk cycle: legs (bottom ~28%) split into halves that lift alternately.
+function makeWalkFrames(spr) {
+  const legY = Math.round(spr.height * 0.72);
+  const legH = spr.height - legY;
+  const halfW = Math.round(spr.width / 2);
+  const frames = [];
+  for (const [dl, dr] of [[-Math.max(3, spr.height * 0.03), 0], [0, -Math.max(3, spr.height * 0.03)]]) {
+    const c = document.createElement('canvas');
+    c.width = spr.width; c.height = spr.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(spr, 0, legY, halfW, legH, 0, legY + dl, halfW, legH);
+    ctx.drawImage(spr, halfW, legY, spr.width - halfW, legH, halfW, legY + dr, spr.width - halfW, legH);
+    ctx.drawImage(spr, 0, 0, spr.width, legY, 0, 0, spr.width, legY); // torso over lifted legs
+    frames.push(c);
+  }
+  return frames;
+}
+
+function sampleColor(img) {
+  const c = document.createElement('canvas');
+  c.width = 8; c.height = 8;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0, 8, 8, 0, 0, 8, 8); // top-left corner block
+  const d = ctx.getImageData(4, 4, 1, 1).data;
+  return `rgb(${d[0]},${d[1]},${d[2]})`;
+}
+
+export function rebuildZones(assets) {
+  for (const [key, recipe] of Object.entries(ZONE_RECIPES)) assets.zones[key] = buildZone(assets.imgs, recipe);
 }
 
 export async function loadAssets() {
@@ -120,7 +167,14 @@ export async function loadAssets() {
   await Promise.all(IMAGE_NAMES.map(async n => { imgs[n] = await loadImage('assets/' + n + '.png'); }));
   const sprites = {};
   for (const n of SPRITE_NAMES) sprites[n] = trim(imgs[n]);
-  const zones = {};
-  for (const [key, recipe] of Object.entries(ZONE_RECIPES)) zones[key] = buildZone(imgs, recipe);
-  return { imgs, sprites, zones };
+  const walk = {};
+  for (const n of HERO_DIR_NAMES) walk[n] = makeWalkFrames(sprites[n]);
+  const menuBg = {
+    'screen-title': sampleColor(imgs['screen-title']),
+    'screen-win': sampleColor(imgs['screen-win']),
+    'screen-died': sampleColor(imgs['screen-died']),
+  };
+  const assets = { imgs, sprites, walk, menuBg, zones: {} };
+  rebuildZones(assets);
+  return assets;
 }
