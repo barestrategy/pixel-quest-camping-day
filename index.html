@@ -21,9 +21,14 @@ canvas{display:block;width:100vw;height:100vh;image-rendering:pixelated;image-re
 <canvas id="game"></canvas>
 <script type="module" src="game.js"></script>
 <script>
-// skip SW on localhost so dev edits are never served from a stale cache
-if ('serviceWorker' in navigator && !['localhost', '127.0.0.1'].includes(location.hostname)) {
-  addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+if ('serviceWorker' in navigator) {
+  if (['localhost', '127.0.0.1'].includes(location.hostname)) {
+    // dev: kill any previously registered SW + caches so edits are never stale
+    navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
+    if (window.caches) caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
+  } else {
+    addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
 }
 </script>
 </body>

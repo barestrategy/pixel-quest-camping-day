@@ -97,16 +97,16 @@ function addProp(L, img, cx, footY, h, opts = {}) {
   return p;
 }
 
-// Cave collision with a real doorway: solid left/right of the opening and a
-// back wall above it, so heroes can actually walk in.
-function caveWithDoor(L, img, cx, footY, h, doorFrac) {
+// Cave collision with a real doorway: the drawn cave has its dark opening at
+// the bottom center, so walking up into it triggers the tunnel.
+function caveWithDoor(L, img, cx, footY, h) {
   const p = addProp(L, img, cx, footY, h, { solid: false });
-  const doorW = p.w * doorFrac;
-  const wallY = footY - h * 0.55, wallH = h * 0.55;
-  L.colliders.push({ x: p.x, y: wallY, w: (p.w - doorW) / 2, h: wallH });
-  L.colliders.push({ x: cx + doorW / 2, y: wallY, w: (p.w - doorW) / 2, h: wallH });
-  L.colliders.push({ x: p.x, y: p.y + h * 0.1, w: p.w, h: h * 0.28 }); // back wall
-  L.caveDoor = { x: cx - doorW / 2, y: footY - h * 0.42, w: doorW, h: h * 0.46 };
+  const doorW = p.w * 0.41; // matches the drawn opening
+  const wallY = footY - h * 0.52;
+  L.colliders.push({ x: p.x, y: wallY, w: cx - doorW / 2 - p.x, h: h * 0.52 });
+  L.colliders.push({ x: cx + doorW / 2, y: wallY, w: p.x + p.w - (cx + doorW / 2), h: h * 0.52 });
+  L.colliders.push({ x: p.x + p.w * 0.06, y: footY - h * 0.86, w: p.w * 0.88, h: h * 0.38 }); // back wall
+  L.caveDoor = { x: cx - doorW / 2, y: footY - h * 0.4, w: doorW, h: h * 0.4 + 22 };
   return p;
 }
 
@@ -142,7 +142,7 @@ function borderWalls(L, gaps) {
 }
 
 function borderTrees(L, rng, assets, variant = '') {
-  const treeNames = ['tree1' + variant, 'tree2' + variant, 'tree3' + variant, 'pine' + variant];
+  const treeNames = ['tree' + variant, 'tree' + (variant === '' ? '-b' : variant + 'b'), 'pine' + variant];
   const place = (cx, footY) => {
     const img = assets.props[treeNames[Math.floor(rng() * treeNames.length)]];
     const h = 84 + rng() * 46;
@@ -207,7 +207,8 @@ function river(L, rng, vertical, c0, bridgeAt, assets) {
       else ctx.fillRect(bridgeAt + dy, bc - hw, PX, hw * 2);
     }
   };
-  const bands = [[40, '#2f6f9f'], [24, '#58a8d8'], [8, '#a5d8f0']];
+  // grassy shore, dark edge, calm body — with sparse light ripples
+  const bands = [[48, '#3d7c2b'], [42, '#2b6a95'], [34, '#4f9fd4']];
   for (let t = -PX; t < len + PX; t += PX) {
     const c = center(t);
     for (const [hw, col] of bands) {
@@ -215,15 +216,15 @@ function river(L, rng, vertical, c0, bridgeAt, assets) {
       if (vertical) ctx.fillRect(c - hw, t, hw * 2, PX);
       else ctx.fillRect(t, c - hw, PX, hw * 2);
     }
-    if (rng() < 0.14) { // foam blocks
-      ctx.fillStyle = '#d8effc';
-      const fo = (Math.floor(rng() * 8) - 4) * PX;
-      if (vertical) ctx.fillRect(c + fo, t, PX / 2, PX / 2);
-      else ctx.fillRect(t, c + fo, PX / 2, PX / 2);
+    if (rng() < 0.35) { // ripple dashes
+      ctx.fillStyle = rng() < 0.25 ? '#e8f6ff' : '#8ec6e8';
+      const fo = (Math.floor(rng() * 7) - 3) * PX;
+      if (vertical) ctx.fillRect(c + fo, t, PX, PX / 2);
+      else ctx.fillRect(t, c + fo, PX / 2, PX);
     }
   }
-  pool(88, 44, '#58a8d8');
-  pool(72, 32, '#8fc9ea');
+  pool(84, 42, '#2b6a95');
+  pool(74, 34, '#4f9fd4');
   for (let t = 0; t < len; t += 24) {
     const c = center(t);
     L.waters.push(vertical ? { x: c - 38, y: t, w: 76, h: 24 } : { x: t, y: c - 38, w: 24, h: 76 });
@@ -336,16 +337,17 @@ export function buildZoneLayout(key, assets) {
   const P = assets.props;
 
   const groundByType = {
-    campsite: 'grass2', battlefield: 'grass1', rocks: 'grass1',
-    darkwoods: 'grass1-dark', riverbend: 'grass2', meadow: 'grass1-sunny',
-    hollow: 'grass1-dark', autumn: 'grass2-autumn', pines: 'grass1-dark',
+    campsite: 'grass', battlefield: 'grass', rocks: 'grass',
+    darkwoods: 'grass-dark', riverbend: 'grass', meadow: 'grass-sunny',
+    hollow: 'grass-dark', autumn: 'grass-autumn', pines: 'grass-dark',
   };
-  const baseDecor = [[['flower1', 'flower2'], 10, 22, 34], [['sparkle'], 3, 20, 30]];
+  const FLOWERS = ['flower-purple', 'flower-blue', 'flower-pink'];
+  const baseDecor = [[FLOWERS, 10, 20, 28], [['sparkle'], 3, 18, 26]];
   const decorByType = {
-    meadow: [[['flower1', 'flower2'], 46, 24, 40], [['sparkle'], 8, 22, 34]],
-    autumn: [[['stone1', 'stone2'], 14, 30, 48], [['flower2'], 8, 22, 32]],
-    rocks: [[['stone1', 'stone2'], 18, 28, 52], [['flower1'], 6, 22, 30]],
-    hollow: [[['mushroom1', 'mushroom2'], 12, 22, 36], [['stone2'], 6, 30, 44]],
+    meadow: [[FLOWERS, 46, 22, 32], [['sparkle'], 8, 20, 28]],
+    autumn: [[['stone'], 14, 26, 40], [['flower-pink'], 8, 20, 28]],
+    rocks: [[['stone'], 18, 26, 44], [['flower-blue'], 6, 20, 26]],
+    hollow: [[['mush'], 12, 22, 32], [['stone'], 6, 26, 38]],
   };
   L.ground = makeGround(assets, rng, groundByType[def.type], decorByType[def.type] || baseDecor);
 
@@ -353,10 +355,10 @@ export function buildZoneLayout(key, assets) {
 
   if (def.type === 'campsite') {
     river(L, rng, true, W * 0.72, H * 0.5, assets);
-    caveWithDoor(L, P['cave-dark'], W * 0.17, H * 0.26, 128, 0.38);
-    addProp(L, P['sign-go'], W * 0.17 + 95, H * 0.26, 46, { solid: false });
+    caveWithDoor(L, P['cave-dark'], W * 0.17, H * 0.26, 132);
+    addProp(L, P['sign-go'], W * 0.17 + 105, H * 0.26, 46, { solid: false });
     addProp(L, P['well'], W * 0.46, H * 0.44, 88, { bw: 0.8, bh: 0.4 });
-    addProp(L, P['pine-big'], W * 0.3, H * 0.3, 165);
+    addProp(L, P['pine'], W * 0.3, H * 0.3, 160);
     // home sweet home: tent (walk in to rest), bonfire, treasure chest
     const tent = addProp(L, P['tent'], W * 0.28, H * 0.82, 140, { bw: 0.8, bh: 0.3 });
     L.tentDoor = { x: tent.x + tent.w * 0.34, y: tent.y + tent.h * 0.6, w: tent.w * 0.32, h: tent.h * 0.46 };
@@ -369,43 +371,43 @@ export function buildZoneLayout(key, assets) {
     const chest = addProp(L, P['chest'], L.chestSpot.x, L.chestSpot.y, 54, { bw: 0.9, bh: 0.3 });
     L.chestZone = { x: chest.x - 24, y: chest.y - 20, w: chest.w + 48, h: chest.h + 44 };
     addProp(L, P['sign-post'], W * 0.6, H * 0.72, 46, { solid: false });
-    scatter(L, rng, [P['tree1'], P['tree2'], P['tree3']], 3, 80, 110);
+    scatter(L, rng, [P['tree'], P['tree-b']], 3, 80, 110);
   } else if (def.type === 'battlefield') {
-    caveWithDoor(L, P['cave-stone'], W * 0.21, H * 0.33, 205, 0.3);
-    addProp(L, P['sign-go'], W * 0.21 + 130, H * 0.33, 48, { solid: false });
+    caveWithDoor(L, P['cave-stone'], W * 0.21, H * 0.31, 185);
+    addProp(L, P['sign-go'], W * 0.21 + 135, H * 0.31, 48, { solid: false });
     addProp(L, P['pond'], W * 0.63, H * 0.36, 175, { bw: 0.8, centerBox: true });
     addProp(L, P['obelisk'], W * 0.79, H * 0.7, 168, { bw: 0.5, bh: 0.2 });
     addProp(L, P['lantern'], W * 0.71, H * 0.78, 54);
     addProp(L, P['sign-motivate'], W * 0.68, H * 0.63, 48, { solid: false });
-    scatter(L, rng, [P['tree1'], P['tree2']], 3, 78, 105);
+    scatter(L, rng, [P['tree'], P['tree-b']], 3, 78, 105);
     scatter(L, rng, [P['rock1'], P['rock2']], 3, 36, 54);
   } else if (def.type === 'riverbend') {
     // river sits in the north third, clear of the east/west entry corridors
     river(L, rng, false, H * 0.22, W * 0.5, assets);
-    scatter(L, rng, [P['tree1'], P['tree2'], P['tree3']], 6, 80, 115);
+    scatter(L, rng, [P['tree'], P['tree-b']], 6, 80, 115);
     scatter(L, rng, [P['rock3']], 2, 38, 52);
   } else if (def.type === 'rocks') {
     scatter(L, rng, [P['rock1'], P['rock2'], P['rock3']], 10, 38, 64);
-    scatter(L, rng, [P['tree1'], P['tree3']], 4, 80, 108);
+    scatter(L, rng, [P['tree'], P['tree-b']], 4, 80, 108);
     addProp(L, P['lantern'], W * 0.5 + 130, H * 0.5 + 130, 52);
   } else if (def.type === 'darkwoods') {
-    scatter(L, rng, [P['tree1-dark'], P['tree2-dark'], P['tree3-dark']], 13, 82, 120);
+    scatter(L, rng, [P['tree-dark'], P['tree-darkb']], 13, 82, 120);
     scatter(L, rng, [P['pine-dark']], 4, 100, 140);
-    scatter(L, rng, [P['mushroom1'], P['mushroom2']], 4, 26, 38, { solid: false });
+    scatter(L, rng, [P['mush']], 4, 26, 38, { solid: false });
   } else if (def.type === 'meadow') {
-    scatter(L, rng, [P['tree1'], P['tree2']], 3, 78, 100);
+    scatter(L, rng, [P['tree'], P['tree-b']], 3, 78, 100);
     addProp(L, P['well'], W * 0.5 + 150, H * 0.5 - 150, 80, { bw: 0.8, bh: 0.4 });
   } else if (def.type === 'hollow') {
     addProp(L, P['pond'], W * 0.5 + 140, H * 0.5 + 155, 140, { bw: 0.8, centerBox: true });
-    scatter(L, rng, [P['tree1-dark'], P['tree3-dark']], 6, 80, 112);
+    scatter(L, rng, [P['tree-dark'], P['tree-darkb']], 6, 80, 112);
     scatter(L, rng, [P['rock2'], P['rock3']], 4, 36, 54);
   } else if (def.type === 'autumn') {
-    scatter(L, rng, [P['tree1-autumn'], P['tree2-autumn'], P['tree3-autumn']], 9, 80, 118);
+    scatter(L, rng, [P['tree-autumn'], P['tree-autumnb']], 9, 80, 118);
     scatter(L, rng, [P['pine-autumn']], 3, 95, 130);
     scatter(L, rng, [P['rock1']], 3, 36, 50);
   } else if (def.type === 'pines') {
     scatter(L, rng, [P['pine-dark']], 10, 95, 145);
-    scatter(L, rng, [P['pine-big-dark']], 3, 130, 170);
+    scatter(L, rng, [P['pine-dark']], 3, 130, 168);
     scatter(L, rng, [P['rock2']], 3, 38, 54);
   }
 

@@ -14,6 +14,7 @@ function getLayout(key) {
 
 const muteBtn = () => ({ x: W - 64, y: H - 64, r: 30 });
 const bonkBtn = () => ({ x: W - 78, y: H - 178, r: 48 });
+const homeBtn = () => ({ x: 64, y: H - 64, r: 30 });
 const startBtnRect = () => ({ x: W / 2 - 150, y: H - 165, w: 300, h: 105 });
 
 const HATS = [
@@ -138,6 +139,8 @@ function startGame(hero) {
   game.carried = 0;
   game.banked = 0;
   game.rested = false;
+  game.sleep = null;
+  game.homeArm = 0;
   game.buffs = { speed: 0, invuln: 0 };
   game.queenDown = false;
   game.shopOpen = false;
@@ -190,10 +193,6 @@ function update(dt) {
   if (state === 'TITLE') {
     if (tap) {
       game.select.chosen = null;
-      game.select.hats = {
-        pixely: localStorage.getItem('pq-hat-pixely') || null,
-        emily: localStorage.getItem('pq-hat-emily') || null,
-      };
       setState('SELECT');
     }
   } else if (state === 'SELECT') {
@@ -211,8 +210,17 @@ function update(dt) {
     if (tap) {
       const w = toWorld(tap.x, tap.y);
       const bb = bonkBtn();
+      const hb = homeBtn();
       if (Math.hypot(w.x - bb.x, w.y - bb.y) < bb.r + 12) {
         tryBonk();
+        tap = null;
+      } else if (Math.hypot(w.x - hb.x, w.y - hb.y) < hb.r + 10) {
+        if (game.homeArm > 0) {
+          setState('TITLE');
+        } else {
+          game.homeArm = 2.5;
+          game.floats.push({ x: hb.x + 10, y: hb.y - 50, text: 'Tap again to quit!', life: 2.2, color: '#fff' });
+        }
         tap = null;
       } else if (game.shopOpen) {
         for (const slot of shopSlots) {
@@ -268,7 +276,10 @@ const entityEvents = {
     if (game.score >= 15) endGame(true);
   },
   onHeal: () => sfx.heal(),
-  onRest: () => sfx.rest(),
+  onRest: () => {
+    game.sleep = { t: 0, dur: 2.6, healed: false };
+    sfx.rest();
+  },
   onBuff: () => sfx.buff(),
   onBank: n => {
     sfx.clink();
@@ -304,6 +315,21 @@ const entityEvents = {
 function updatePlay(dt) {
   const p = game.player;
   if (game.banner.t > 0) game.banner.t -= dt;
+  if (game.homeArm > 0) game.homeArm -= dt;
+
+  // asleep in the tent: night falls, hearts refill, morning comes
+  if (game.sleep) {
+    const s = game.sleep;
+    s.t += dt;
+    if (!s.healed && s.t >= s.dur / 2) {
+      s.healed = true;
+      game.hearts = 6;
+      game.floats.push({ x: p.x, y: p.y - 60, text: 'All rested!', life: 1.4 });
+      sfx.heal();
+    }
+    if (s.t >= s.dur) game.sleep = null;
+    return;
+  }
 
   if (game.fade) {
     const f = game.fade;
@@ -517,6 +543,7 @@ function drawPlay(t) {
       ctx.fillStyle = 'rgba(232,48,42,' + (game.flash * 1.2) + ')';
       ctx.fillRect(-20, -20, W + 40, H + 40);
     }
+    if (game.sleep) drawSleep(layout);
   }
   drawHud();
   drawBanner();
@@ -615,6 +642,30 @@ function drawHeart(x, y, fill, px) {
   }
 }
 
+// night falls over the camp while you sleep; Zzz's drift up from the tent
+function drawSleep(layout) {
+  const s = game.sleep;
+  const k = Math.sin(Math.PI * Math.min(1, s.t / s.dur)); // 0 -> 1 -> 0
+  ctx.fillStyle = 'rgba(9,14,46,' + (k * 0.8).toFixed(3) + ')';
+  ctx.fillRect(-20, -20, W + 40, H + 40);
+  if (k > 0.25) { // a few stars once it's dark enough
+    ctx.fillStyle = 'rgba(255,255,240,' + ((k - 0.25) * 0.9).toFixed(3) + ')';
+    for (let i = 0; i < 9; i++) {
+      ctx.fillRect(((i * 173 + 60) % W), 40 + ((i * 97) % 130), 3, 3);
+    }
+  }
+  const d = layout.tentDoor;
+  if (d) {
+    ctx.textAlign = 'center';
+    for (let i = 0; i < 3; i++) {
+      const zt = (s.t * 0.55 + i * 0.33) % 1;
+      ctx.font = 'bold ' + Math.round(22 + i * 7 + zt * 8) + 'px "Courier New", monospace';
+      ctx.fillStyle = 'rgba(255,255,255,' + ((1 - zt) * k).toFixed(3) + ')';
+      ctx.fillText('Z', d.x + d.w / 2 + 26 + zt * 44 + i * 10, d.y - 30 - zt * 70 - i * 12);
+    }
+  }
+}
+
 function drawShop(layout) {
   shopSlots = [];
   const cs = layout.chestSpot;
@@ -681,6 +732,20 @@ function drawHud() {
   ctx.fillStyle = '#fff';
   ctx.fillText('BONK', bb.x, bb.y + bb.r - 14);
   ctx.restore();
+  // home button (tap twice to quit to the title screen)
+  const hb = homeBtn();
+  ctx.save();
+  ctx.globalAlpha = game.homeArm > 0 ? 1 : 0.7;
+  ctx.fillStyle = game.homeArm > 0 ? 'rgba(160,40,30,0.7)' : 'rgba(0,0,0,0.45)';
+  ctx.beginPath(); ctx.arc(hb.x, hb.y, hb.r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); // roof
+  ctx.moveTo(hb.x, hb.y - 15); ctx.lineTo(hb.x + 16, hb.y - 1); ctx.lineTo(hb.x - 16, hb.y - 1);
+  ctx.closePath(); ctx.fill();
+  ctx.fillRect(hb.x - 10, hb.y - 1, 20, 14); // walls
+  ctx.fillStyle = game.homeArm > 0 ? 'rgba(160,40,30,0.9)' : 'rgba(0,0,0,0.6)';
+  ctx.fillRect(hb.x - 3, hb.y + 4, 6, 9); // door
+  ctx.restore();
   // score with coin icon
   const coin = assets.sprites['coin'];
   const ch = 34, cw = ch * (coin.width / coin.height);
@@ -742,12 +807,6 @@ function drawSelect(t) {
       ctx.fill();
     }
     ctx.drawImage(spr, cx - w / 2, cy - h / 2, w, h);
-    const ownHat = game.select.hats && game.select.hats[hero];
-    if (ownHat) {
-      const hatImg = assets.props['hat-' + ownHat];
-      const hw = w * 0.62, hh = hw * (hatImg.height / hatImg.width);
-      ctx.drawImage(hatImg, cx - hw / 2, cy - h / 2 - hh + h * 0.09, hw, hh);
-    }
     // name chip
     ctx.fillStyle = '#fff';
     const chipW = 150, chipY = strip + 24;

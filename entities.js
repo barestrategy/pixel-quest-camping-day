@@ -174,14 +174,11 @@ export function updateEntities(game, dt, events, layout) {
   }
   game.drops = game.drops.filter(dr => !dr.collected);
 
-  // tent: step inside to rest up
+  // tent: step inside to sleep (game.js runs the night-time sequence)
   if (layout.tentDoor && rectHas(layout.tentDoor, p.x, p.y)) {
-    if (game.hearts < 6 && !game.rested) {
-      game.hearts = 6;
+    if (game.hearts < 6 && !game.rested && !game.sleep) {
       game.rested = true;
       events.onRest();
-      burst(game, p.x, p.y - 30, '#ffe9a8', 14);
-      game.floats.push({ x: p.x, y: p.y - 50, text: 'All rested!', life: 1.4 });
     }
   } else {
     game.rested = false;
@@ -214,6 +211,17 @@ export function updateEntities(game, dt, events, layout) {
         const pos = randomOpenSpot(layout, 60, p, 300);
         a.x = pos.x; a.y = pos.y; a.gone = false; a.chasing = false;
       }
+      continue;
+    }
+    // bounced off the hero: recoil, then a 2s grace period before it can bite again
+    if (a.hitCd > 0) a.hitCd -= dt;
+    if (a.kb) {
+      a.kb.t -= dt;
+      a.x += a.kb.vx * dt; a.y += a.kb.vy * dt;
+      a.kb.vx *= 0.88; a.kb.vy *= 0.88;
+      a.x = Math.max(20, Math.min(W - 20, a.x));
+      a.y = Math.max(20, Math.min(H - 20, a.y));
+      if (a.kb.t <= 0) a.kb = null;
       continue;
     }
 
@@ -253,6 +261,10 @@ export function updateEntities(game, dt, events, layout) {
       a.heading = Math.atan2(-dy, -dx); // flee the s'more-powered hero!
       speed = chaseSpeed;
       a.chasing = false;
+    } else if (a.hitCd > 0) {
+      a.chasing = false; // just bit you — wanders off for a moment
+      a.turnT -= dt;
+      if (a.turnT <= 0) { a.heading = rand(0, Math.PI * 2); a.turnT = rand(0.6, 2); }
     } else if (dist < aggro) {
       a.heading = Math.atan2(dy, dx); // spotted you — chase!
       speed = chaseSpeed;
@@ -269,10 +281,14 @@ export function updateEntities(game, dt, events, layout) {
     a.x = Math.max(r, Math.min(W - r, a.x));
     a.y = Math.max(r, Math.min(H - r, a.y));
 
-    // contact damage
-    if (!invuln && p.hurtT <= 0 && dist < size / 2 + 22) {
+    // contact damage — both bounce apart, and this ant backs off for 2s
+    if (!invuln && p.hurtT <= 0 && (!a.hitCd || a.hitCd <= 0) && dist < size / 2 + 22) {
       game.hearts--;
       p.hurtT = 1;
+      a.hitCd = 2;
+      const away = dist > 4 ? Math.atan2(dy, dx) : rand(0, Math.PI * 2);
+      a.kb = { vx: -Math.cos(away) * (a.queen ? 160 : 240), vy: -Math.sin(away) * (a.queen ? 160 : 240), t: 0.38 };
+      if (a.queen) { a.state = 'cooldown'; a.stateT = 1.5; }
       if (game.carried > 0) { // one carried treasure pops loose
         game.carried--;
         game.drops.push({
@@ -377,7 +393,7 @@ export function drawEntities(ctx, assets, game, t, layout, drawPlayerFn) {
     ctx.strokeStyle = 'rgba(0,0,0,0.6)';
     ctx.lineWidth = 4;
     ctx.strokeText(f.text, f.x, f.y);
-    ctx.fillStyle = '#ffe14d';
+    ctx.fillStyle = f.color || '#ffe14d';
     ctx.fillText(f.text, f.x, f.y);
     ctx.restore();
   }

@@ -27,44 +27,17 @@ const HERO_DIR_NAMES = [
   'emily-up', 'emily-down', 'emily-left', 'emily-right',
 ];
 
-// Props cropped straight out of the kids' two paintings: [source, x, y, w, h].
+// The few crops kept from the kids' paintings (they read well as-is):
 const PROP_RECTS = {
-  'cave-dark':     ['bg-campsite', 115, 96, 125, 112],
-  'well':          ['bg-campsite', 443, 315, 100, 75],
   'chest':         ['bg-campsite', 582, 352, 44, 40],
-  'bridge':        ['bg-campsite', 612, 418, 92, 50],
-  'pine-big':      ['bg-campsite', 178, 300, 85, 158],
   'sign-arrow':    ['bg-campsite', 283, 110, 44, 44],
   'sign-post':     ['bg-campsite', 835, 243, 40, 44],
-  'cave-stone':    ['bg-battlefield', 128, 92, 232, 215],
-  'pond':          ['bg-battlefield', 482, 176, 230, 162],
-  'obelisk':       ['bg-battlefield', 714, 282, 86, 176],
-  'lantern':       ['bg-battlefield', 692, 452, 58, 60],
-  'bridge2':       ['bg-battlefield', 806, 58, 112, 65],
-  'pine':          ['bg-battlefield', 362, 58, 66, 140],
-  'tree1':         ['bg-battlefield', 830, 325, 70, 70],
-  'tree2':         ['bg-battlefield', 697, 66, 68, 66],
-  'tree3':         ['bg-battlefield', 50, 298, 68, 65],
-  'rock1':         ['bg-battlefield', 253, 36, 50, 42],
-  'rock2':         ['bg-battlefield', 855, 533, 56, 50],
-  'rock3':         ['bg-battlefield', 60, 573, 55, 48],
-  'mushroom1':     ['bg-battlefield', 213, 310, 30, 30],
-  'mushroom2':     ['bg-battlefield', 112, 398, 44, 42],
   'sign-go':       ['bg-battlefield', 359, 197, 55, 50],
   'sign-motivate': ['bg-battlefield', 609, 402, 90, 50],
-  'stone1':        ['bg-battlefield', 650, 510, 52, 32],
-  'stone2':        ['bg-battlefield', 570, 576, 50, 34],
-  'flower1':       ['bg-battlefield', 812, 373, 32, 30],
-  'flower2':       ['bg-battlefield', 685, 648, 36, 40],
-  'sparkle':       ['bg-battlefield', 850, 608, 34, 36],
-  'grass1':        ['bg-battlefield', 386, 340, 100, 100],
-  'grass2':        ['bg-campsite', 84, 232, 128, 128],
+  'obelisk':       ['bg-battlefield', 714, 282, 86, 176],
 };
-
-// Tiles keep their full rectangle; bridges only lose their corners (they sit on
-// drawn water that covers their edge midpoints).
-const NO_MASK = new Set(['grass1', 'grass2']);
-const CORNER_MASK = new Set(['bridge', 'bridge2']);
+const NO_MASK = new Set();
+const CORNER_MASK = new Set(['chest', 'sign-arrow', 'sign-post', 'sign-go', 'sign-motivate', 'obelisk']);
 
 function cropProp(imgs, [src, x, y, w, h], mode) {
   const c = document.createElement('canvas');
@@ -318,6 +291,215 @@ function makeHat(kind) {
   return c;
 }
 
+// ---- code-drawn pixel props (same chunky style as the well) ----
+
+function mk(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+// blocky ellipse — the core shape of the whole prop set
+function bEllipse(x, cx, cy, rx, ry, col, B = 4) {
+  x.fillStyle = col;
+  for (let dy = -ry; dy < ry; dy += B) {
+    const hw = Math.floor(rx * Math.sqrt(Math.max(0, 1 - ((dy + B / 2) / ry) ** 2)) / B) * B;
+    x.fillRect(cx - hw, cy + dy, hw * 2, B);
+  }
+}
+
+function speck(x, rng, n, xa, ya, xb, yb, cols, B = 4) {
+  for (let i = 0; i < n; i++) {
+    x.fillStyle = cols[Math.floor(rng() * cols.length)];
+    x.fillRect(xa + Math.floor(rng() * (xb - xa) / B) * B, ya + Math.floor(rng() * (yb - ya) / B) * B, B, B);
+  }
+}
+
+const rng01 = seed => { let a = seed; return () => { a = (a * 1103515245 + 12345) & 0x7fffffff; return a / 0x7fffffff; }; };
+
+const TREE_PALS = {
+  '':        { leafD: '#2e6b23', leaf: '#429331', leafL: '#61b649', trunk: '#6b4a26', trunkD: '#57381b' },
+  '-b':      { leafD: '#2a6130', leaf: '#3a883f', leafL: '#55ab52', trunk: '#6b4a26', trunkD: '#57381b' },
+  '-dark':   { leafD: '#1d4718', leaf: '#2b6322', leafL: '#3d7d30', trunk: '#4a3418', trunkD: '#38260f' },
+  '-darkb':  { leafD: '#1b4022', leaf: '#28592c', leafL: '#39733c', trunk: '#4a3418', trunkD: '#38260f' },
+  '-autumn': { leafD: '#8a4d16', leaf: '#b56a1e', leafL: '#dd922e', trunk: '#5c3a1c', trunkD: '#452a11' },
+  '-autumnb':{ leafD: '#7d3f12', leaf: '#a85a24', leafL: '#cc7f2e', trunk: '#5c3a1c', trunkD: '#452a11' },
+};
+
+function makeTree(pal, seed) {
+  const c = mk(88, 108);
+  const x = c.getContext('2d');
+  const rng = rng01(seed);
+  x.fillStyle = pal.trunk; x.fillRect(36, 72, 16, 32);
+  x.fillStyle = pal.trunkD; x.fillRect(46, 72, 6, 32);
+  bEllipse(x, 44, 46, 40, 36, pal.leafD);
+  bEllipse(x, 40, 40, 32, 28, pal.leaf);
+  bEllipse(x, 34, 32, 18, 14, pal.leafL);
+  speck(x, rng, 14, 12, 12, 76, 70, [pal.leafL, pal.leafD]);
+  return c;
+}
+
+function makePine(pal) {
+  const c = mk(72, 124);
+  const x = c.getContext('2d');
+  x.fillStyle = pal.trunk; x.fillRect(30, 100, 12, 24);
+  const tier = (topY, halfW, hgt, col, off = 0) => {
+    x.fillStyle = col;
+    for (let dy = 0; dy < hgt; dy += 4) {
+      const hw = Math.floor((halfW * (dy + 4) / hgt) / 4) * 4;
+      x.fillRect(36 + off - hw, topY + dy, hw * 2, 4);
+    }
+  };
+  tier(44, 34, 60, pal.leafD);
+  tier(24, 26, 52, pal.leaf);
+  tier(4, 18, 40, pal.leafL, -2);
+  return c;
+}
+
+const PINE_PALS = {
+  '':        { leafD: '#24512c', leaf: '#33703c', leafL: '#4b9150', trunk: '#57381b' },
+  '-dark':   { leafD: '#183a20', leaf: '#24512c', leafL: '#33703c', trunk: '#38260f' },
+  '-autumn': { leafD: '#6b3d12', leaf: '#96591c', leafL: '#bf7c28', trunk: '#452a11' },
+};
+
+function makeRock(w, h, seed) {
+  const c = mk(w, h);
+  const x = c.getContext('2d');
+  const rng = rng01(seed);
+  bEllipse(x, w / 2, h / 2 + 4, w / 2 - 2, h / 2 - 6, '#4a463e');
+  bEllipse(x, w / 2, h / 2, w / 2 - 4, h / 2 - 8, '#8b867c');
+  bEllipse(x, w / 2 - 6, h / 2 - 6, w / 4, h / 5, '#b3ada1');
+  speck(x, rng, 6, 8, h / 3, w - 8, h - 8, ['#6e695f', '#9a958a']);
+  return c;
+}
+
+function makeStone() {
+  const c = mk(40, 22);
+  const x = c.getContext('2d');
+  bEllipse(x, 20, 12, 18, 8, '#6e695f');
+  bEllipse(x, 20, 10, 16, 6, '#9a958a');
+  return c;
+}
+
+function makeFlower(col) {
+  const c = mk(22, 24);
+  const x = c.getContext('2d');
+  x.fillStyle = '#2f8a1f';
+  x.fillRect(10, 12, 3, 10);
+  x.fillRect(4, 16, 6, 3);
+  x.fillStyle = col;
+  x.fillRect(7, 3, 4, 4); x.fillRect(15, 3, 4, 4);
+  x.fillRect(7, 9, 4, 4); x.fillRect(15, 9, 4, 4);
+  x.fillStyle = '#ffd84d'; x.fillRect(11, 6, 4, 4);
+  return c;
+}
+
+function makeMush() {
+  const c = mk(26, 26);
+  const x = c.getContext('2d');
+  x.fillStyle = '#efe6d4'; x.fillRect(9, 14, 8, 10);
+  bEllipse(x, 13, 10, 12, 7, '#c1272b');
+  x.fillStyle = '#fff'; x.fillRect(7, 6, 3, 3); x.fillRect(15, 8, 3, 3);
+  return c;
+}
+
+function makeSparkleProp() {
+  const c = mk(28, 28);
+  const x = c.getContext('2d');
+  x.fillStyle = '#f4fbff';
+  x.fillRect(12, 2, 4, 24); x.fillRect(2, 12, 24, 4);
+  x.fillStyle = '#bfe6ff'; x.fillRect(12, 12, 4, 4);
+  return c;
+}
+
+function makeLantern() {
+  const c = mk(36, 56);
+  const x = c.getContext('2d');
+  x.fillStyle = '#6e695f'; x.fillRect(8, 46, 20, 8);   // base
+  x.fillStyle = '#8b867c'; x.fillRect(14, 24, 8, 24);  // post
+  x.fillStyle = '#4a463e'; x.fillRect(6, 8, 24, 18);   // housing
+  x.fillStyle = '#ffd84d'; x.fillRect(12, 12, 12, 10); // light
+  x.fillStyle = '#8b867c'; x.fillRect(4, 4, 28, 6);    // cap
+  return c;
+}
+
+// top-down wooden bridge: dark rails, planked walkway
+function makeBridge() {
+  const c = mk(152, 84);
+  const x = c.getContext('2d');
+  x.fillStyle = '#8a5f33';
+  x.fillRect(0, 10, 152, 64);
+  x.fillStyle = '#a9713d';
+  for (let px = 0; px < 152; px += 16) x.fillRect(px, 10, 8, 64);
+  x.fillStyle = '#6b4a26';
+  for (let px = 0; px < 152; px += 16) x.fillRect(px + 14, 10, 2, 64);
+  x.fillStyle = '#4a3418';
+  x.fillRect(0, 0, 152, 10); x.fillRect(0, 74, 152, 10);
+  x.fillStyle = '#5c452a';
+  for (let px = 0; px < 152; px += 24) { x.fillRect(px, 0, 6, 10); x.fillRect(px, 74, 6, 10); }
+  return c;
+}
+
+// rocky mound with a dark south-facing doorway at the bottom center
+function makeCave(base, light, dark, seed) {
+  const c = mk(176, 132);
+  const x = c.getContext('2d');
+  const rng = rng01(seed);
+  bEllipse(x, 88, 78, 86, 54, dark);
+  bEllipse(x, 88, 72, 80, 48, base);
+  bEllipse(x, 78, 58, 52, 28, light);
+  speck(x, rng, 16, 16, 24, 160, 100, [dark, light]);
+  x.fillStyle = '#3f7d31'; // mossy top blocks
+  speck(x, rng, 8, 40, 12, 130, 40, ['#3f7d31', '#2e6b23']);
+  // doorway
+  x.fillStyle = '#15100b';
+  x.fillRect(56, 78, 64, 54);
+  bEllipse(x, 88, 80, 32, 18, '#15100b');
+  x.fillStyle = dark; // arch trim
+  x.fillRect(52, 76, 6, 56); x.fillRect(118, 76, 6, 56);
+  x.fillStyle = '#57381b'; x.fillRect(58, 126, 60, 6); // dirt floor hint
+  return c;
+}
+
+function makePond() {
+  const c = mk(224, 148);
+  const x = c.getContext('2d');
+  bEllipse(x, 112, 76, 110, 68, '#57524a');
+  bEllipse(x, 112, 74, 102, 60, '#8b867c');
+  bEllipse(x, 112, 76, 90, 50, '#2b6a95');
+  bEllipse(x, 112, 74, 82, 44, '#4f9fd4');
+  bEllipse(x, 96, 62, 36, 16, '#8ec6e8');
+  const rng = rng01(7);
+  speck(x, rng, 8, 48, 40, 180, 110, ['#e8f6ff']);
+  for (const [lx, ly] of [[70, 96], [150, 58], [138, 104]]) {
+    bEllipse(x, lx, ly, 12, 7, '#3f8f2e');
+    bEllipse(x, lx - 2, ly - 1, 6, 3, '#61b649');
+  }
+  return c;
+}
+
+const GRASS_PALS = {
+  'grass':        { base: '#65a83c', d: '#58962f', l: '#74ba49' },
+  'grass-sunny':  { base: '#85b944', d: '#76a739', l: '#98cc55' },
+  'grass-dark':   { base: '#4c7d31', d: '#417029', l: '#588c3a' },
+  'grass-autumn': { base: '#b08a3c', d: '#9e7a32', l: '#c19c4a' },
+};
+
+function makeGrass(pal, seed) {
+  const c = mk(64, 64);
+  const x = c.getContext('2d');
+  const rng = rng01(seed);
+  x.fillStyle = pal.base;
+  x.fillRect(0, 0, 64, 64);
+  speck(x, rng, 26, 0, 0, 64, 64, [pal.d, pal.l]);
+  for (let i = 0; i < 5; i++) { // grass tufts
+    const tx = Math.floor(rng() * 15) * 4, ty = Math.floor(rng() * 14) * 4;
+    x.fillStyle = pal.l;
+    x.fillRect(tx, ty, 2, 6); x.fillRect(tx + 4, ty + 2, 2, 4);
+  }
+  return c;
+}
+
 function cloneCanvas(c) {
   const out = document.createElement('canvas');
   out.width = c.width; out.height = c.height;
@@ -341,22 +523,38 @@ export async function loadAssets() {
   for (const [name, rect] of Object.entries(PROP_RECTS)) {
     props[name] = cropProp(imgs, rect, NO_MASK.has(name) ? 'none' : CORNER_MASK.has(name) ? 'corners' : 'ellipse');
   }
-  // mood variants for the themed zones
-  for (const n of ['tree1', 'tree2', 'tree3', 'pine', 'pine-big']) {
-    props[n + '-dark'] = applyColorFilter(cloneCanvas(props[n]), { bright: 0.68 });
-    props[n + '-autumn'] = applyColorFilter(cloneCanvas(props[n]), { hue: -45, sat: 1.15 });
-  }
   props['tent'] = makeTent();
   props['logs'] = makeLogs();
-  props['well'] = makeWell(); // replaces the messy crop
-  props['bridge-h'] = rotate90(props['bridge']); // for rivers that flow east-west
+  props['well'] = makeWell();
   props['berry'] = makeBerry();
   props['smore'] = makeSmore();
   props['hat-party'] = makeHat('party');
   props['hat-crown'] = makeHat('crown');
   props['hat-wizard'] = makeHat('wizard');
-  props['grass1-dark'] = applyColorFilter(cloneCanvas(props['grass1']), { bright: 0.78 });
-  props['grass1-sunny'] = applyColorFilter(cloneCanvas(props['grass1']), { hue: -10, bright: 1.12 });
-  props['grass2-autumn'] = applyColorFilter(cloneCanvas(props['grass2']), { hue: -30, sat: 1.05 });
+  // the whole prop set is code-drawn in the same chunky style as the well
+  for (const [suffix, pal] of Object.entries(TREE_PALS)) {
+    props['tree' + suffix] = makeTree(pal, 11 + suffix.length);
+  }
+  for (const [suffix, pal] of Object.entries(PINE_PALS)) {
+    props['pine' + suffix] = makePine(pal);
+  }
+  props['rock1'] = makeRock(68, 48, 3);
+  props['rock2'] = makeRock(52, 38, 8);
+  props['rock3'] = makeRock(60, 42, 21);
+  props['stone'] = makeStone();
+  props['flower-purple'] = makeFlower('#b45ad0');
+  props['flower-blue'] = makeFlower('#5a8ad0');
+  props['flower-pink'] = makeFlower('#e46a9c');
+  props['mush'] = makeMush();
+  props['sparkle'] = makeSparkleProp();
+  props['lantern'] = makeLantern();
+  props['bridge'] = makeBridge();
+  props['bridge-h'] = rotate90(props['bridge']);
+  props['cave-dark'] = makeCave('#6e6152', '#8a7a66', '#463c30', 5);
+  props['cave-stone'] = makeCave('#77746e', '#96938a', '#4a473f', 9);
+  props['pond'] = makePond();
+  for (const [name, pal] of Object.entries(GRASS_PALS)) {
+    props[name] = makeGrass(pal, 17 + name.length);
+  }
   return { imgs, sprites, walk, menuBg, props };
 }
