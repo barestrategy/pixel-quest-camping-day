@@ -2,6 +2,9 @@
 import { W, H, loadAssets, ZONE_RECIPES } from './assets.js';
 import { input, initInput, getMove, takeTap, clearFrameFlags, drawJoystick } from './input.js';
 import { initItems, enterZone, updateEntities, drawEntities } from './entities.js';
+import { unlock, setTheme, sfx, toggleMute, isMuted } from './audio.js';
+
+const MUTE_BTN = { x: W - 64, y: H - 64, r: 30 };
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -61,6 +64,7 @@ function showBanner(text) {
 
 function startTransition(dx, dy) {
   game.transition = { dx, dy, t: 0 };
+  sfx.whoosh();
 }
 
 function setState(s) {
@@ -84,12 +88,15 @@ function startGame(hero) {
   initItems(game);
   enterZone(game);
   showBanner(ZONE_RECIPES['1,1'].name);
+  setTheme('camp');
   setState('PLAY');
 }
 
 function endGame(won) {
   game.best = Math.max(game.best, game.score);
   localStorage.setItem('pq-best', String(game.best));
+  setTheme(null);
+  if (won) sfx.win(); else sfx.die();
   setState(won ? 'WIN' : 'DIED');
 }
 
@@ -97,7 +104,17 @@ function endGame(won) {
 
 function update(dt) {
   stateTime += dt;
-  const tap = takeTap();
+  if (input.anyPress) unlock(); // iOS: audio must start from a user gesture
+  let tap = takeTap();
+
+  // mute button works in every state
+  if (tap) {
+    const w = toWorld(tap.x, tap.y);
+    if (Math.hypot(w.x - MUTE_BTN.x, w.y - MUTE_BTN.y) < MUTE_BTN.r + 10) {
+      toggleMute();
+      tap = null;
+    }
+  }
 
   if (state === 'TITLE') {
     if (tap) setState('SELECT');
@@ -149,12 +166,14 @@ function updatePlay(dt) {
 
   updateEntities(game, dt, {
     onPickup: () => {
+      sfx.pickup();
       if (game.score >= 15) endGame(true);
     },
     onHurt: () => {
       game.shake = 0.3;
       game.flash = 0.25;
       if (game.hearts <= 0) endGame(false);
+      else sfx.hurt();
     },
   });
   if (state !== 'PLAY') return;
@@ -172,6 +191,7 @@ function onZoneEnter() {
   game.visited.add(zoneKey());
   showBanner(ZONE_RECIPES[zoneKey()].name);
   enterZone(game);
+  setTheme(zoneKey() === '1,1' ? 'camp' : 'adventure');
 }
 
 // ---------- draw ----------
@@ -205,7 +225,33 @@ function draw(t) {
     pulseText('TAP TO TRY AGAIN', W / 2, H * 0.85, 32, t, '#3a0000');
   }
 
+  if (state !== 'LOADING') drawMuteButton();
   drawJoystick(ctx, view.dpr);
+}
+
+function drawMuteButton() {
+  const { x, y, r } = MUTE_BTN;
+  ctx.save();
+  ctx.globalAlpha = 0.8;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  // pixel speaker
+  ctx.fillRect(x - 14, y - 6, 8, 12);
+  ctx.beginPath();
+  ctx.moveTo(x - 6, y - 6); ctx.lineTo(x + 2, y - 13); ctx.lineTo(x + 2, y + 13); ctx.lineTo(x - 6, y + 6);
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  if (isMuted()) {
+    ctx.strokeStyle = '#e8302a';
+    ctx.beginPath(); ctx.moveTo(x + 6, y - 8); ctx.lineTo(x + 16, y + 8); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + 16, y - 8); ctx.lineTo(x + 6, y + 8); ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.arc(x + 4, y, 8, -0.9, 0.9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x + 4, y, 14, -0.9, 0.9); ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawPlay(t) {
