@@ -12,15 +12,16 @@ function getLayout(key) {
   return layouts[key];
 }
 
-const muteBtn = () => ({ x: W - 64, y: H - 64, r: 30 });
-const bonkBtn = () => ({ x: W - 78, y: H - 178, r: 48 });
-const homeBtn = () => ({ x: 64, y: H - 64, r: 30 });
+const muteBtn = () => ({ x: W - 64 - view.safe.r, y: H - 64 - view.safe.b, r: 30 });
+const bonkBtn = () => ({ x: W - 78 - view.safe.r, y: H - 178 - view.safe.b, r: 48 });
+const homeBtn = () => ({ x: 64 + view.safe.l, y: H - 64 - view.safe.b, r: 30 });
 const startBtnRect = () => ({ x: W / 2 - 150, y: H - 165, w: 300, h: 105 });
 
+// hats are badges earned during the run — everything resets when it ends
 const HATS = [
-  { id: 'party', name: 'Party', cost: 4 },
-  { id: 'crown', name: 'Crown', cost: 8 },
-  { id: 'wizard', name: 'Wizard', cost: 12 },
+  { id: 'party', name: 'Party Hat', how: 'Store 8 treasures' },
+  { id: 'crown', name: 'Crown', how: 'Bonk the Queen!' },
+  { id: 'wizard', name: 'Wizard Hat', how: '3 cave treasures' },
 ];
 const BUFF_TIME = { speed: 10, invuln: 8 };
 let shopSlots = []; // world-space tap targets, rebuilt each draw
@@ -32,7 +33,7 @@ const HERO_HEIGHT = 84;       // on-screen hero height in world px
 const PLAYER_SPEED = 220;     // world px / s
 const PLAYER_RADIUS = 24;     // collision radius
 
-const view = { scale: 1, ox: 0, oy: 0, dpr: 1 };
+const view = { scale: 1, ox: 0, oy: 0, dpr: 1, safe: { l: 0, t: 0, r: 0, b: 0 } };
 let assets = null;
 
 function resize() {
@@ -51,6 +52,10 @@ function resize() {
   view.scale = Math.min(innerWidth / W, innerHeight / H);
   view.ox = (innerWidth - W * view.scale) / 2;
   view.oy = (innerHeight - H * view.scale) / 2;
+  // keep the HUD out of notches and rounded phone corners
+  const cs = getComputedStyle(document.documentElement);
+  const inset = name => (parseFloat(cs.getPropertyValue(name)) || 0) / view.scale;
+  view.safe = { l: inset('--sal'), t: inset('--sat'), r: inset('--sar'), b: inset('--sab') };
 }
 addEventListener('resize', resize);
 resize();
@@ -79,7 +84,7 @@ const game = {
   score: 0,               // total this run = carried + banked; 15 wins
   carried: 0,             // loose treasure — an ant hit knocks one out
   banked: 0,              // safe in the campsite chest
-  wallet: Number(localStorage.getItem('pq-wallet') || 0), // lifetime, for the shop
+  caveFinds: 0,           // tunnel treasures found this run (3 earns the wizard hat)
   hearts: 6,              // half-heart units; 6 = three full hearts
   zone: { x: 1, y: 1 },
   player: { x: W / 2, y: H / 2 + 60, dir: 'down', moving: false, hurtT: 0 },
@@ -131,13 +136,12 @@ function setState(s) {
 
 function startGame(hero) {
   game.hero = hero;
-  // hats are unlocked per character
-  game.hatsOwned = new Set(JSON.parse(localStorage.getItem('pq-hats-' + hero) || '[]'));
-  game.hat = localStorage.getItem('pq-hat-' + hero) || null;
-  if (game.hat && !game.hatsOwned.has(game.hat)) game.hat = null;
+  game.hatsOwned = new Set(); // fresh run, fresh badges
+  game.hat = null;
   game.score = 0;
   game.carried = 0;
   game.banked = 0;
+  game.caveFinds = 0;
   game.rested = false;
   game.sleep = null;
   game.homeArm = 0;
@@ -177,7 +181,12 @@ function endGame(won) {
 
 function update(dt) {
   stateTime += dt;
-  if (input.anyPress) unlock(); // iOS: audio must start from a user gesture
+  if (input.anyPress) {
+    unlock(); // backup — the primary unlock happens inside the gesture handler
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('landscape').catch(() => {}); // works on installed Android PWAs
+    }
+  }
   let tap = takeTap();
 
   // mute button works in every state
@@ -245,33 +254,36 @@ function tryBonk() {
   if (state !== 'PLAY' || game.transition || game.fade || p.swingCd > 0) return;
   p.swing = { t: 0.25, dir: p.dir };
   p.swingCd = 0.45;
-  bonkAttack(game, entityEvents);
+  bonkAttack(game, entityEvents, getLayout(zoneKey()));
 }
 
 function shopTap(hat) {
   const p = game.player;
   if (game.hatsOwned.has(hat.id)) {
     game.hat = game.hat === hat.id ? null : hat.id;
-    localStorage.setItem('pq-hat-' + game.hero, game.hat || '');
     sfx.pickup();
-  } else if (game.wallet >= hat.cost) {
-    game.wallet -= hat.cost;
-    localStorage.setItem('pq-wallet', String(game.wallet));
-    game.hatsOwned.add(hat.id);
-    localStorage.setItem('pq-hats-' + game.hero, JSON.stringify([...game.hatsOwned]));
-    game.hat = hat.id;
-    localStorage.setItem('pq-hat-' + game.hero, hat.id);
-    sfx.clink();
-    game.floats.push({ x: p.x, y: p.y - 60, text: hat.name + ' hat!', life: 1.2 });
   } else {
     sfx.buzz();
-    game.floats.push({ x: p.x, y: p.y - 60, text: 'Need more treasure!', life: 1.2 });
+    game.floats.push({ x: p.x, y: p.y - 60, text: hat.how, life: 1.4, color: '#fff' });
   }
 }
 
+function unlockHat(id) {
+  if (game.hatsOwned.has(id)) return;
+  game.hatsOwned.add(id);
+  game.hat = id; // wear it right away — kids love the instant reward
+  const hat = HATS.find(h => h.id === id);
+  showBanner(hat.name + ' earned!');
+  sfx.buff();
+}
+
 const entityEvents = {
-  onPickup: () => {
+  onPickup: fromCave => {
     sfx.pickup();
+    if (fromCave) {
+      game.caveFinds++;
+      if (game.caveFinds >= 3) unlockHat('wizard');
+    }
     game.score = game.carried + game.banked;
     if (game.score >= 15) endGame(true);
   },
@@ -281,10 +293,9 @@ const entityEvents = {
     sfx.rest();
   },
   onBuff: () => sfx.buff(),
-  onBank: n => {
+  onBank: () => {
     sfx.clink();
-    game.wallet += n;
-    localStorage.setItem('pq-wallet', String(game.wallet));
+    if (game.banked >= 8) unlockHat('party');
   },
   onDropLost: () => {
     game.score = game.carried + game.banked;
@@ -303,6 +314,7 @@ const entityEvents = {
     sfx.bossDown();
     showBanner('QUEEN BONKED!');
     game.shake = 0.5;
+    setTimeout(() => unlockHat('crown'), 1600); // let the boss banner land first
   },
   onHurt: () => {
     game.shake = 0.3;
@@ -460,7 +472,7 @@ function onZoneEnter() {
 
 function draw(t) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = '#12300a';
+  ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.setTransform(view.scale * view.dpr, 0, 0, view.scale * view.dpr, view.ox * view.dpr, view.oy * view.dpr);
   ctx.imageSmoothingEnabled = false;
@@ -568,7 +580,7 @@ function drawBanner() {
 function drawMinimap() {
   const cell = 16, gap = 3, pad = 6;
   const mw = 3 * cell + 2 * gap + pad * 2;
-  const x0 = W / 2 - mw / 2, y0 = 12;
+  const x0 = W / 2 - mw / 2, y0 = 12 + view.safe.t;
   ctx.fillStyle = 'rgba(0,0,0,0.4)';
   ctx.fillRect(x0, y0, mw, mw);
   for (let zy = 0; zy < 3; zy++) {
@@ -670,7 +682,7 @@ function drawSleep(layout) {
 function drawShop(layout) {
   shopSlots = [];
   const cs = layout.chestSpot;
-  const pw = 3 * 130 + 2 * 12 + 28, ph = 172;
+  const pw = 3 * 148 + 2 * 12 + 28, ph = 176;
   const x0 = Math.max(12, Math.min(W - pw - 12, cs.x - pw / 2));
   const y0 = Math.max(84, cs.y - 80 - ph);
   ctx.fillStyle = 'rgba(10,20,8,0.85)';
@@ -678,9 +690,10 @@ function drawShop(layout) {
   ctx.strokeStyle = '#ffd84d';
   ctx.lineWidth = 3;
   ctx.strokeRect(x0, y0, pw, ph);
-  drawCenterText('HAT SHOP — treasure saved: ' + game.wallet, x0 + pw / 2, y0 + 28, 22, '#ffd84d');
+  drawCenterText('HATS — treasures stored: ' + game.banked, x0 + pw / 2, y0 + 28, 22, '#ffd84d');
   HATS.forEach((hat, i) => {
-    const sx = x0 + 14 + i * 142, sy = y0 + 42, sw = 130, sh = 118;
+    const sx = x0 + 14 + i * 160, sy = y0 + 42, sw = 148, sh = 122;
+    const owned = game.hatsOwned.has(hat.id);
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
     ctx.fillRect(sx, sy, sw, sh);
     if (game.hat === hat.id) {
@@ -689,30 +702,34 @@ function drawShop(layout) {
       ctx.strokeRect(sx, sy, sw, sh);
     }
     const img = assets.props['hat-' + hat.id];
+    ctx.save();
+    if (!owned) ctx.globalAlpha = 0.28; // locked: shadowy badge
     ctx.drawImage(img, sx + sw / 2 - 33, sy + 8, 66, 48);
-    const label = game.hat === hat.id ? 'Equipped!' : game.hatsOwned.has(hat.id) ? 'Tap to wear' : hat.cost + ' treasure';
-    drawCenterText(hat.name, sx + sw / 2, sy + 82, 20, '#fff');
-    drawCenterText(label, sx + sw / 2, sy + 106, 16, game.hatsOwned.has(hat.id) ? '#8aff8a' : '#ffd84d');
+    ctx.restore();
+    drawCenterText(owned ? hat.name : '? ? ?', sx + sw / 2, sy + 80, 19, '#fff');
+    const label = game.hat === hat.id ? 'Equipped!' : owned ? 'Tap to wear' : hat.how;
+    drawCenterText(label, sx + sw / 2, sy + 104, 13, owned ? '#8aff8a' : '#ffd84d');
     shopSlots.push({ x: sx, y: sy, w: sw, h: sh, hat });
   });
 }
 
 function drawHud() {
   const px = 6;
+  const hx = 22 + view.safe.l, hy = 18 + view.safe.t;
   for (let i = 0; i < 3; i++) {
     const units = Math.max(0, Math.min(2, game.hearts - i * 2)); // 0, 1 or 2 half-units
-    drawHeart(16 + i * (7 * px + 10), 14, units / 2, px);
+    drawHeart(hx + i * (7 * px + 10), hy, units / 2, px);
   }
   // active buff icons under the hearts
-  let bx = 18;
+  let bx = hx + 2;
   for (const [buff, prop] of [['speed', 'berry'], ['invuln', 'smore']]) {
     if (game.buffs[buff] > 0) {
       const img = assets.props[prop];
-      ctx.drawImage(img, bx, 62, 30, 30 * (img.height / img.width));
+      ctx.drawImage(img, bx, hy + 48, 30, 30 * (img.height / img.width));
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
-      ctx.fillRect(bx, 94, 30, 5);
+      ctx.fillRect(bx, hy + 80, 30, 5);
       ctx.fillStyle = '#8aff8a';
-      ctx.fillRect(bx, 94, 30 * Math.min(1, game.buffs[buff] / BUFF_TIME[buff]), 5);
+      ctx.fillRect(bx, hy + 80, 30 * Math.min(1, game.buffs[buff] / BUFF_TIME[buff]), 5);
       bx += 40;
     }
   }
@@ -750,23 +767,24 @@ function drawHud() {
   // score with coin icon
   const coin = assets.sprites['coin'];
   const ch = 34, cw = ch * (coin.width / coin.height);
-  ctx.drawImage(coin, W - 150, 12, cw, ch);
+  const sx = W - 168 - view.safe.r, sy = 16 + view.safe.t;
+  ctx.drawImage(coin, sx, sy, cw, ch);
   ctx.font = 'bold 30px "Courier New", monospace';
   ctx.textAlign = 'left';
   ctx.fillStyle = '#fff';
   ctx.strokeStyle = 'rgba(0,0,0,0.7)';
   ctx.lineWidth = 5;
   const scoreText = game.score + '/15';
-  ctx.strokeText(scoreText, W - 150 + cw + 8, 12 + ch - 8);
-  ctx.fillText(scoreText, W - 150 + cw + 8, 12 + ch - 8);
+  ctx.strokeText(scoreText, sx + cw + 8, sy + ch - 8);
+  ctx.fillText(scoreText, sx + cw + 8, sy + ch - 8);
   // banked treasure marker
   if (game.banked > 0) {
     const chest = assets.props['chest'];
     const chH = 26, chW = chH * (chest.width / chest.height);
-    ctx.drawImage(chest, W - 150, 50, chW, chH);
+    ctx.drawImage(chest, sx, sy + 38, chW, chH);
     ctx.font = 'bold 22px "Courier New", monospace';
-    ctx.strokeText('x' + game.banked, W - 150 + chW + 6, 70);
-    ctx.fillText('x' + game.banked, W - 150 + chW + 6, 70);
+    ctx.strokeText('x' + game.banked, sx + chW + 6, sy + 58);
+    ctx.fillText('x' + game.banked, sx + chW + 6, sy + 58);
   }
   drawMinimap();
 }
@@ -830,10 +848,17 @@ function drawSelect(t) {
   ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, W, strip);
-  ctx.fillStyle = '#04e360';
+  ctx.fillStyle = '#8ed8f8'; // open sky behind the campers
   ctx.fillRect(0, strip + 8, W / 2 - 12, H);
-  ctx.fillStyle = '#04f04c';
+  ctx.fillStyle = '#7fcdf2';
   ctx.fillRect(W / 2 + 12, strip + 8, W / 2 - 12, H);
+  // drifting pixel clouds
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  for (const [cx2, cy2, s] of [[0.14, 0.3, 1], [0.34, 0.42, 0.7], [0.64, 0.32, 1.1], [0.86, 0.45, 0.8]]) {
+    const px2 = cx2 * W, py2 = cy2 * H * 0.8;
+    ctx.fillRect(px2 - 28 * s, py2, 56 * s, 12 * s);
+    ctx.fillRect(px2 - 16 * s, py2 - 10 * s, 32 * s, 12 * s);
+  }
   // grassy ground strip with flowers under the campers
   const gt = assets.props['grass'];
   for (let gx = 0; gx < W; gx += 64) ctx.drawImage(gt, gx, H - 56, 64, 64);
@@ -928,9 +953,34 @@ function loop(t) {
       canvas.height !== Math.round(innerHeight * Math.min(devicePixelRatio || 1, 3))) {
     resize();
   }
+  if (innerHeight > innerWidth) { // landscape-only: ask for a rotate
+    drawRotatePrompt(t);
+    requestAnimationFrame(loop);
+    return;
+  }
   update(dt);
   draw(t);
   requestAnimationFrame(loop);
+}
+
+function drawRotatePrompt(t) {
+  ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, innerWidth, innerHeight);
+  const cx = innerWidth / 2, cy = innerHeight / 2;
+  ctx.save();
+  ctx.translate(cx, cy - 40);
+  ctx.rotate(Math.sin(t * 0.003) * 0.35 + 0.35); // gently rocks toward landscape
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 5;
+  ctx.strokeRect(-28, -48, 56, 96); // phone outline
+  ctx.fillRect(-8, 36, 16, 5);      // home bar
+  ctx.restore();
+  ctx.font = 'bold 22px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.fillText('Turn your device sideways!', cx, cy + 70);
 }
 
 loadAssets().then(a => {

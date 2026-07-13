@@ -1,4 +1,6 @@
 // Floating virtual joystick + keyboard fallback + tap detection.
+import { unlock } from './audio.js';
+
 const JOY_MAX = 56;      // px of thumb travel (screen space)
 const JOY_DEAD = 8;      // deadzone before movement registers
 const TAP_TIME = 300;    // ms
@@ -18,6 +20,7 @@ export function initInput(canvas) {
   canvas.addEventListener('pointerdown', e => {
     e.preventDefault();
     try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic pointers can't be captured */ }
+    unlock(); // iOS: audio must start inside the actual gesture handler
     input.anyPress = true;
     downInfo = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
     if (joyPointerId === null) {
@@ -70,6 +73,7 @@ export function initInput(canvas) {
     W: 'up', S: 'down', A: 'left', D: 'right',
   };
   window.addEventListener('keydown', e => {
+    unlock();
     const k = KEYMAP[e.key];
     if (k) { input.keys.add(k); e.preventDefault(); }
     if (e.key === ' ') { input.bonkPressed = true; input.anyPress = true; e.preventDefault(); }

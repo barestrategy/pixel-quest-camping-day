@@ -1,12 +1,11 @@
 // Cache-first service worker — the whole game works offline after first load.
-const CACHE = 'pixel-quest-v5';
+const CACHE = 'pixel-quest-v6';
 const ASSETS = [
   '.', 'index.html', 'game.js', 'assets.js', 'input.js', 'entities.js', 'audio.js', 'zonegen.js',
   'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'assets/pixely-up.png', 'assets/pixely-down.png', 'assets/pixely-left.png', 'assets/pixely-right.png',
   'assets/emily-up.png', 'assets/emily-down.png', 'assets/emily-left.png', 'assets/emily-right.png',
   'assets/queen-ant.png', 'assets/coin.png', 'assets/gem.png', 'assets/mushroom.png',
-  'assets/bg-campsite.png', 'assets/bg-battlefield.png',
   'assets/screen-title.png', 'assets/screen-win.png', 'assets/screen-died.png',
   'assets/start-button.png', 'assets/pop.wav',
 ];

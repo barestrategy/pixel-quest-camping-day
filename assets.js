@@ -12,7 +12,6 @@ const IMAGE_NAMES = [
   'pixely-up', 'pixely-down', 'pixely-left', 'pixely-right',
   'emily-up', 'emily-down', 'emily-left', 'emily-right',
   'queen-ant', 'coin', 'gem', 'mushroom',
-  'bg-campsite', 'bg-battlefield',
   'screen-title', 'screen-died', 'screen-win', 'start-button',
 ];
 
@@ -27,40 +26,7 @@ const HERO_DIR_NAMES = [
   'emily-up', 'emily-down', 'emily-left', 'emily-right',
 ];
 
-// The one crop kept from the kids' paintings (it reads well as-is):
-const PROP_RECTS = {
-  'obelisk': ['bg-battlefield', 714, 282, 86, 176],
-};
-const NO_MASK = new Set();
-const CORNER_MASK = new Set(['obelisk']);
-
-function cropProp(imgs, [src, x, y, w, h], mode) {
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  const ctx = c.getContext('2d');
-  ctx.drawImage(imgs[src], x, y, w, h, 0, 0, w, h);
-  if (mode === 'none') return c;
-  // blocky elliptical cutout: crops lose their rectangle corners with a crisp
-  // 4px-stepped edge (soft gradient fades read as blurry blobs in pixel art)
-  const d = ctx.getImageData(0, 0, w, h);
-  const rx = w / 2, ry = h / 2;
-  const cut = mode === 'corners' ? 1.45 : 0.94;
-  const B = 4;
-  for (let by = 0; by < h; by += B) {
-    for (let bx = 0; bx < w; bx += B) {
-      const nx = (bx + B / 2 - rx) / rx, ny = (by + B / 2 - ry) / ry;
-      if (nx * nx + ny * ny > cut) {
-        for (let py = by; py < Math.min(h, by + B); py++) {
-          for (let px = bx; px < Math.min(w, bx + B); px++) {
-            d.data[(py * w + px) * 4 + 3] = 0;
-          }
-        }
-      }
-    }
-  }
-  ctx.putImageData(d, 0, 0);
-  return c;
-}
+// The whole prop set is now code-drawn — no more crops from the paintings.
 
 function rotate90(src) {
   const c = document.createElement('canvas');
@@ -530,6 +496,28 @@ function makeChest() {
   return c;
 }
 
+// the mysterious glowing obelisk (recreated from the kids' battlefield painting)
+function makeObelisk() {
+  const c = mk(72, 152);
+  const x = c.getContext('2d');
+  x.fillStyle = '#57524a'; x.fillRect(8, 138, 56, 12);   // stepped base
+  x.fillStyle = '#6e695f'; x.fillRect(14, 128, 44, 12);
+  x.fillStyle = '#8b867c'; x.fillRect(22, 14, 28, 116);  // slab
+  x.fillStyle = '#b3ada1'; x.fillRect(22, 14, 7, 116);   // lit edge
+  x.fillStyle = '#5d584f'; x.fillRect(44, 14, 6, 116);   // shaded edge
+  x.fillStyle = '#9a958a'; x.fillRect(24, 6, 24, 10);    // cap
+  x.fillStyle = '#b3ada1'; x.fillRect(28, 2, 16, 6);     // tip
+  [26, 40, 54, 68, 82, 96, 110].forEach((gy, i) => {     // glowing glyphs
+    x.fillStyle = '#2f86c8';
+    x.fillRect(31, gy, 10, 9);
+    x.fillStyle = '#8fd8ff';
+    if (i % 3 === 0) x.fillRect(33, gy + 3, 6, 3);
+    else if (i % 3 === 1) { x.fillRect(33, gy + 2, 2, 5); x.fillRect(37, gy + 2, 2, 5); }
+    else { x.fillRect(33, gy + 2, 6, 2); x.fillRect(35, gy + 5, 2, 2); }
+  });
+  return c;
+}
+
 // leafy bush — replaces mushroom decor (looked too much like the collectible)
 function makeBush() {
   const c = mk(34, 26);
@@ -562,9 +550,6 @@ export async function loadAssets() {
     'screen-died': sampleColor(imgs['screen-died']),
   };
   const props = {};
-  for (const [name, rect] of Object.entries(PROP_RECTS)) {
-    props[name] = cropProp(imgs, rect, NO_MASK.has(name) ? 'none' : CORNER_MASK.has(name) ? 'corners' : 'ellipse');
-  }
   props['tent'] = makeTent();
   props['logs'] = makeLogs();
   props['well'] = makeWell();
@@ -592,6 +577,7 @@ export async function loadAssets() {
   props['sparkle'] = makeSparkleProp();
   props['lantern'] = makeLantern();
   props['chest'] = makeChest();
+  props['obelisk'] = makeObelisk();
   props['sign-goin'] = makeSign(['GO IN', 'HERE!']);
   props['sign-motivation'] = makeSign(['THIS IS', 'MOTIVATION']);
   props['sign-home'] = makeSign(['HOME SWEET', 'HOME']);

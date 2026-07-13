@@ -1,6 +1,6 @@
 // Collectibles, ants, particles, floating text — collision-aware, y-sorted.
 import { W, H } from './assets.js';
-import { blockedAt, moveWithCollision, randomOpenSpot } from './zonegen.js';
+import { blockedAt, moveWithCollision, randomOpenSpot, findOpenNear } from './zonegen.js';
 
 const ITEM_RADIUS = 26;
 const ANT_SIZE = 52;          // regular ant height in world px
@@ -69,7 +69,7 @@ export function enterZone(game, layout) {
 // The hero swings in their facing direction; nearby ants get bonked.
 const DIRV = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
 
-export function bonkAttack(game, events) {
+export function bonkAttack(game, events, layout) {
   const p = game.player;
   const dv = DIRV[p.dir];
   for (const a of game.ants) {
@@ -81,7 +81,7 @@ export function bonkAttack(game, events) {
       a.hp--;
       a.hurtFlash = 0.45;
       a.state = 'cooldown'; a.stateT = 1.2;
-      a.x += (dx / d) * 46; a.y += (dy / d) * 46;
+      moveWithCollision(a, (dx / d) * 46, (dy / d) * 46, layout, QUEEN_SIZE * 0.3);
       if (a.hp <= 0) {
         a.gone = true;
         a.respawnT = Infinity;
@@ -135,7 +135,7 @@ export function updateEntities(game, dt, events, layout) {
         game.floats.push({ x: item.x, y: item.y - 20, text: "S'MORE POWER!", life: 1.2 });
       } else {
         game.carried++;
-        events.onPickup();
+        events.onPickup(key === 'U');
         burst(game, item.x, item.y, '#ffd94d', 12);
         game.floats.push({ x: item.x, y: item.y - 20, text: '+1', life: 0.9 });
       }
@@ -146,8 +146,8 @@ export function updateEntities(game, dt, events, layout) {
       const count = kind => game.items.filter(i => i.kind === kind && i !== item).length;
       const roll = Math.random();
       if (count('heart') < 2 && roll < 0.12) item.kind = 'heart';
-      else if (count('berry') < 1 && roll < 0.19) item.kind = 'berry';
-      else if (count('smore') < 1 && roll < 0.26) item.kind = 'smore';
+      else if (count('berry') < 1 && roll < 0.24) item.kind = 'berry';
+      else if (count('smore') < 1 && roll < 0.36) item.kind = 'smore';
       else item.kind = 'treasure';
       if (item.zone === key) {
         const pos = randomOpenSpot(layout, 50, p, 200);
@@ -168,7 +168,7 @@ export function updateEntities(game, dt, events, layout) {
     } else if (dr.age > 0.8 && Math.hypot(dr.x - p.x, dr.y - p.y) < 42) {
       dr.collected = true;
       game.carried++;
-      events.onPickup();
+      events.onPickup(false);
       burst(game, dr.x, dr.y, '#ffd94d', 8);
       game.floats.push({ x: dr.x, y: dr.y - 20, text: '+1', life: 0.9 });
     }
@@ -218,7 +218,8 @@ export function updateEntities(game, dt, events, layout) {
     if (a.hitCd > 0) a.hitCd -= dt;
     if (a.kb) {
       a.kb.t -= dt;
-      a.x += a.kb.vx * dt; a.y += a.kb.vy * dt;
+      const kr = (a.queen ? QUEEN_SIZE : ANT_SIZE) * 0.3;
+      moveWithCollision(a, a.kb.vx * dt, a.kb.vy * dt, layout, kr); // never recoil into a wall/pond
       a.kb.vx *= 0.88; a.kb.vy *= 0.88;
       a.x = Math.max(20, Math.min(W - 20, a.x));
       a.y = Math.max(20, Math.min(H - 20, a.y));
@@ -276,6 +277,10 @@ export function updateEntities(game, dt, events, layout) {
       if (a.turnT <= 0) { a.heading = rand(0, Math.PI * 2); a.turnT = rand(0.6, 2); }
     }
     const r = size * 0.3;
+    if (blockedAt(layout, a.x, a.y, r * 0.7)) { // somehow wedged inside something — pop free
+      const pos = findOpenNear(layout, a.x, a.y);
+      a.x = pos.x; a.y = pos.y;
+    }
     const hit = moveWithCollision(a, Math.cos(a.heading) * speed * dt, Math.sin(a.heading) * speed * dt, layout, r);
     if (hit.hitX) { a.heading = Math.PI - a.heading; if (a.state === 'charge') a.stateT = 0; }
     if (hit.hitY) { a.heading = -a.heading; if (a.state === 'charge') a.stateT = 0; }

@@ -89,7 +89,7 @@ function addProp(L, img, cx, footY, h, opts = {}) {
   if (opts.solid !== false) {
     const bw = w * (opts.bw ?? 0.72), bh = h * (opts.bh ?? 0.3);
     p.box = opts.centerBox
-      ? { x: cx - bw / 2, y: footY - h * 0.62, w: bw, h: h * 0.5 }
+      ? { x: cx - bw / 2, y: footY - h * 0.78, w: bw, h: h * 0.68 }
       : { x: cx - bw / 2, y: footY - bh, w: bw, h: bh };
     L.colliders.push(p.box);
   }
