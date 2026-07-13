@@ -27,17 +27,12 @@ const HERO_DIR_NAMES = [
   'emily-up', 'emily-down', 'emily-left', 'emily-right',
 ];
 
-// The few crops kept from the kids' paintings (they read well as-is):
+// The one crop kept from the kids' paintings (it reads well as-is):
 const PROP_RECTS = {
-  'chest':         ['bg-campsite', 582, 352, 44, 40],
-  'sign-arrow':    ['bg-campsite', 283, 110, 44, 44],
-  'sign-post':     ['bg-campsite', 835, 243, 40, 44],
-  'sign-go':       ['bg-battlefield', 359, 197, 55, 50],
-  'sign-motivate': ['bg-battlefield', 609, 402, 90, 50],
-  'obelisk':       ['bg-battlefield', 714, 282, 86, 176],
+  'obelisk': ['bg-battlefield', 714, 282, 86, 176],
 };
 const NO_MASK = new Set();
-const CORNER_MASK = new Set(['chest', 'sign-arrow', 'sign-post', 'sign-go', 'sign-motivate', 'obelisk']);
+const CORNER_MASK = new Set(['obelisk']);
 
 function cropProp(imgs, [src, x, y, w, h], mode) {
   const c = document.createElement('canvas');
@@ -500,6 +495,53 @@ function makeGrass(pal, seed) {
   return c;
 }
 
+// readable wooden signpost with actual text on the board
+function makeSign(lines) {
+  const font = 'bold 15px "Courier New", monospace';
+  const meas = mk(1, 1).getContext('2d');
+  meas.font = font;
+  const tw = Math.max(...lines.map(l => meas.measureText(l).width));
+  const lineH = 17, padX = 12;
+  const bw = Math.ceil(tw) + padX * 2, bh = lines.length * lineH + 12;
+  const c = mk(bw, bh + 26);
+  const x = c.getContext('2d');
+  x.fillStyle = '#6b4a26'; x.fillRect(bw / 2 - 5, bh - 4, 10, 30); // post
+  x.fillStyle = '#8a5f33'; x.fillRect(0, 0, bw, bh);               // board
+  x.fillStyle = '#a9713d'; x.fillRect(0, 0, bw, 4);
+  x.strokeStyle = '#5c3a1c'; x.lineWidth = 3;
+  x.strokeRect(1.5, 1.5, bw - 3, bh - 3);
+  x.fillStyle = '#4a3418'; x.fillRect(5, 5, 3, 3); x.fillRect(bw - 8, 5, 3, 3); // nails
+  x.font = font; x.textAlign = 'center'; x.fillStyle = '#31200c';
+  lines.forEach((l, i) => x.fillText(l, bw / 2, 18 + i * lineH));
+  return c;
+}
+
+function makeChest() {
+  const c = mk(48, 42);
+  const x = c.getContext('2d');
+  x.fillStyle = '#5c3a1c'; x.fillRect(2, 6, 44, 34);   // outline body
+  x.fillStyle = '#a06238'; x.fillRect(5, 9, 38, 12);   // lid
+  x.fillStyle = '#8a5230'; x.fillRect(5, 21, 38, 16);  // base
+  x.fillStyle = '#c17c48'; x.fillRect(5, 9, 38, 4);    // lid highlight
+  x.fillStyle = '#3d2610';                             // straps
+  x.fillRect(10, 6, 5, 34); x.fillRect(33, 6, 5, 34);
+  x.fillStyle = '#ffd84d'; x.fillRect(20, 17, 8, 11);  // lock
+  x.fillStyle = '#8a6a10'; x.fillRect(23, 21, 2, 4);   // keyhole
+  return c;
+}
+
+// leafy bush — replaces mushroom decor (looked too much like the collectible)
+function makeBush() {
+  const c = mk(34, 26);
+  const x = c.getContext('2d');
+  bEllipse(x, 17, 17, 15, 8, '#255c1c');
+  bEllipse(x, 14, 12, 11, 7, '#2e6b23');
+  bEllipse(x, 20, 10, 7, 5, '#429331');
+  x.fillStyle = '#61b649';
+  x.fillRect(8, 8, 3, 3); x.fillRect(22, 14, 3, 3);
+  return c;
+}
+
 function cloneCanvas(c) {
   const out = document.createElement('canvas');
   out.width = c.width; out.height = c.height;
@@ -546,8 +588,13 @@ export async function loadAssets() {
   props['flower-blue'] = makeFlower('#5a8ad0');
   props['flower-pink'] = makeFlower('#e46a9c');
   props['mush'] = makeMush();
+  props['bush'] = makeBush();
   props['sparkle'] = makeSparkleProp();
   props['lantern'] = makeLantern();
+  props['chest'] = makeChest();
+  props['sign-goin'] = makeSign(['GO IN', 'HERE!']);
+  props['sign-motivation'] = makeSign(['THIS IS', 'MOTIVATION']);
+  props['sign-home'] = makeSign(['HOME SWEET', 'HOME']);
   props['bridge'] = makeBridge();
   props['bridge-h'] = rotate90(props['bridge']);
   props['cave-dark'] = makeCave('#6e6152', '#8a7a66', '#463c30', 5);

@@ -289,17 +289,14 @@ function buildCaveLayout(assets) {
   for (let x = 0; x < W + 40; x += 46) { wall(x + rng() * 20, 30 + rng() * 26, 34 + rng() * 16); wall(x + rng() * 20, H - 36 - rng() * 20, 34 + rng() * 16); }
   for (let y = 60; y < H - 40; y += 48) { wall(26 + rng() * 22, y, 34 + rng() * 14); wall(W - 30 - rng() * 22, y, 34 + rng() * 14); }
   borderWalls(L, {});
-  // glowing crystals (the kids' gem, cyan-shifted, with a light pool)
-  const gem = assets.sprites['gem'];
-  for (let i = 0; i < 7; i++) {
-    const x = 140 + rng() * (W - 280), y = 150 + rng() * (H - 280);
-    const g = ctx.createRadialGradient(x, y, 4, x, y, 55);
-    g.addColorStop(0, 'rgba(120,220,255,0.35)');
+  // soft light pools — ambience only; the real treasure spawns as pickups
+  for (let i = 0; i < 4; i++) {
+    const x1 = 160 + rng() * (W - 320), y1 = 160 + rng() * (H - 320);
+    const g = ctx.createRadialGradient(x1, y1, 4, x1, y1, 60);
+    g.addColorStop(0, 'rgba(120,220,255,0.22)');
     g.addColorStop(1, 'rgba(120,220,255,0)');
     ctx.fillStyle = g;
-    ctx.fillRect(x - 55, y - 55, 110, 110);
-    const h = 24 + rng() * 16, w = h * (gem.width / gem.height);
-    ctx.drawImage(gem, x - w / 2, y - h / 2, w, h);
+    ctx.fillRect(x1 - 60, y1 - 60, 120, 120);
   }
   // two lit exits: west ladder -> campsite cave, east ladder -> battlefield cave
   const ladder = (x, y) => {
@@ -347,7 +344,7 @@ export function buildZoneLayout(key, assets) {
     meadow: [[FLOWERS, 46, 22, 32], [['sparkle'], 8, 20, 28]],
     autumn: [[['stone'], 14, 26, 40], [['flower-pink'], 8, 20, 28]],
     rocks: [[['stone'], 18, 26, 44], [['flower-blue'], 6, 20, 26]],
-    hollow: [[['mush'], 12, 22, 32], [['stone'], 6, 26, 38]],
+    hollow: [[['bush'], 12, 20, 30], [['stone'], 6, 26, 38]],
   };
   L.ground = makeGround(assets, rng, groundByType[def.type], decorByType[def.type] || baseDecor);
 
@@ -356,9 +353,9 @@ export function buildZoneLayout(key, assets) {
   if (def.type === 'campsite') {
     river(L, rng, true, W * 0.72, H * 0.5, assets);
     caveWithDoor(L, P['cave-dark'], W * 0.17, H * 0.26, 132);
-    addProp(L, P['sign-go'], W * 0.17 + 105, H * 0.26, 46, { solid: false });
+    addProp(L, P['sign-goin'], W * 0.17 + 125, H * 0.26, P['sign-goin'].height, { solid: false });
     addProp(L, P['well'], W * 0.46, H * 0.44, 88, { bw: 0.8, bh: 0.4 });
-    addProp(L, P['pine'], W * 0.3, H * 0.3, 160);
+    addProp(L, P['pine'], W * 0.35, H * 0.33, 160);
     // home sweet home: tent (walk in to rest), bonfire, treasure chest
     const tent = addProp(L, P['tent'], W * 0.28, H * 0.82, 140, { bw: 0.8, bh: 0.3 });
     L.tentDoor = { x: tent.x + tent.w * 0.34, y: tent.y + tent.h * 0.6, w: tent.w * 0.32, h: tent.h * 0.46 };
@@ -370,15 +367,15 @@ export function buildZoneLayout(key, assets) {
     L.chestSpot = { x: W * 0.42, y: H * 0.76 };
     const chest = addProp(L, P['chest'], L.chestSpot.x, L.chestSpot.y, 54, { bw: 0.9, bh: 0.3 });
     L.chestZone = { x: chest.x - 24, y: chest.y - 20, w: chest.w + 48, h: chest.h + 44 };
-    addProp(L, P['sign-post'], W * 0.6, H * 0.72, 46, { solid: false });
+    addProp(L, P['sign-home'], W * 0.55, H * 0.86, P['sign-home'].height, { solid: false });
     scatter(L, rng, [P['tree'], P['tree-b']], 3, 80, 110);
   } else if (def.type === 'battlefield') {
     caveWithDoor(L, P['cave-stone'], W * 0.21, H * 0.31, 185);
-    addProp(L, P['sign-go'], W * 0.21 + 135, H * 0.31, 48, { solid: false });
+    addProp(L, P['sign-goin'], W * 0.21 + 150, H * 0.31, P['sign-goin'].height, { solid: false });
     addProp(L, P['pond'], W * 0.63, H * 0.36, 175, { bw: 0.8, centerBox: true });
     addProp(L, P['obelisk'], W * 0.79, H * 0.7, 168, { bw: 0.5, bh: 0.2 });
     addProp(L, P['lantern'], W * 0.71, H * 0.78, 54);
-    addProp(L, P['sign-motivate'], W * 0.68, H * 0.63, 48, { solid: false });
+    addProp(L, P['sign-motivation'], W * 0.68, H * 0.62, P['sign-motivation'].height, { solid: false });
     scatter(L, rng, [P['tree'], P['tree-b']], 3, 78, 105);
     scatter(L, rng, [P['rock1'], P['rock2']], 3, 36, 54);
   } else if (def.type === 'riverbend') {
@@ -393,7 +390,7 @@ export function buildZoneLayout(key, assets) {
   } else if (def.type === 'darkwoods') {
     scatter(L, rng, [P['tree-dark'], P['tree-darkb']], 13, 82, 120);
     scatter(L, rng, [P['pine-dark']], 4, 100, 140);
-    scatter(L, rng, [P['mush']], 4, 26, 38, { solid: false });
+    scatter(L, rng, [P['bush']], 4, 24, 34, { solid: false });
   } else if (def.type === 'meadow') {
     scatter(L, rng, [P['tree'], P['tree-b']], 3, 78, 100);
     addProp(L, P['well'], W * 0.5 + 150, H * 0.5 - 150, 80, { bw: 0.8, bh: 0.4 });

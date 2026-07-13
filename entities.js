@@ -32,7 +32,8 @@ export function itemType(score) {
 export function initItems(game) {
   // positions are assigned lazily, on first entry into each zone
   game.items = OUTER_ZONES.map(z => ({ zone: z, x: 0, y: 0, placed: false }));
-  game.items.push({ zone: 'U', x: 0, y: 0, placed: false }); // tunnel treasure
+  // tunnel treasure: three collectible crystals glinting in the dark
+  for (let i = 0; i < 3; i++) game.items.push({ zone: 'U', x: 0, y: 0, placed: false });
   game.drops = [];
   game.particles = [];
   game.floats = [];
@@ -392,9 +393,12 @@ export function drawEntities(ctx, assets, game, t, layout, drawPlayerFn) {
     ctx.textAlign = 'center';
     ctx.strokeStyle = 'rgba(0,0,0,0.6)';
     ctx.lineWidth = 4;
-    ctx.strokeText(f.text, f.x, f.y);
+    // keep the text on screen even when it spawns near an edge
+    const fw = ctx.measureText(f.text).width / 2 + 12;
+    const fx = Math.max(fw, Math.min(W - fw, f.x));
+    ctx.strokeText(f.text, fx, f.y);
     ctx.fillStyle = f.color || '#ffe14d';
-    ctx.fillText(f.text, f.x, f.y);
+    ctx.fillText(f.text, fx, f.y);
     ctx.restore();
   }
 }

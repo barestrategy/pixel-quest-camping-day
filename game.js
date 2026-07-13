@@ -219,7 +219,7 @@ function update(dt) {
           setState('TITLE');
         } else {
           game.homeArm = 2.5;
-          game.floats.push({ x: hb.x + 10, y: hb.y - 50, text: 'Tap again to quit!', life: 2.2, color: '#fff' });
+          game.floats.push({ x: hb.x + 90, y: hb.y - 50, text: 'Tap again to quit!', life: 2.2, color: '#fff' });
         }
         tap = null;
       } else if (game.shopOpen) {
@@ -469,6 +469,7 @@ function draw(t) {
     drawCenterText('Loading…', W / 2, H / 2, 36, '#cfe8b0');
   } else if (state === 'TITLE') {
     drawMenuScreen('screen-title');
+    drawTitleDecor(t);
     pulseText('TAP TO START', W / 2, H * 0.72, 40, t);
     drawCenterText('A game by the Pixel Quest kids', W / 2, H - 30, 20, 'rgba(255,255,255,0.75)');
   } else if (state === 'SELECT') {
@@ -780,6 +781,47 @@ function drawMenuScreen(key) {
   ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
 }
 
+// a cozy camp scene dressing up the title screen
+function drawTitleDecor(t) {
+  const P = assets.props;
+  const trees = [P['tree'], P['tree-b'], P['pine']];
+  for (let i = 0, x = -24; x < W + 40; i++, x += 96) { // treetops peeking in
+    const img = trees[i % 3];
+    const h = 84 + (i % 2) * 24;
+    ctx.drawImage(img, x, -h * 0.4, h * (img.width / img.height), h);
+  }
+  const tent = P['tent'];
+  const th = 118, tw = th * (tent.width / tent.height);
+  const baseY = H - 36;
+  ctx.drawImage(tent, W * 0.05, baseY - th, tw, th);
+  const fx = W * 0.05 + tw + 48, fy = baseY - 14;
+  ctx.drawImage(P['logs'], fx - 28, fy - 15, 56, 30);
+  drawMenuFlame(fx, fy - 6, t);
+  const px = assets.sprites['pixely-down'], em = assets.sprites['emily-down'];
+  const hh = 84;
+  ctx.drawImage(px, fx + 42, baseY - hh, hh * (px.width / px.height), hh);
+  ctx.drawImage(em, fx + 42 + 64, baseY - hh, hh * (em.width / em.height), hh);
+  const fl = [P['flower-purple'], P['flower-pink'], P['flower-blue']];
+  for (let i = 0; i < 6; i++) {
+    ctx.drawImage(fl[i % 3], W - 60 - i * 48, H - 48 - (i % 2) * 16, 22, 24);
+  }
+  ctx.drawImage(P['bush'], W - 120, H - 40, 44, 34);
+}
+
+function drawMenuFlame(x, y, t) {
+  const h = 30 + Math.sin(t * 0.019) * 5 + Math.sin(t * 0.043) * 3;
+  for (const [k, col] of [[1, '#ff5a1f'], [0.68, '#ff9a2b'], [0.4, '#ffd84d']]) {
+    const hh = h * k;
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(x - hh * 0.38, y);
+    ctx.quadraticCurveTo(x - hh * 0.3, y - hh * 0.55, x, y - hh);
+    ctx.quadraticCurveTo(x + hh * 0.3, y - hh * 0.55, x + hh * 0.38, y);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
 function drawSelect(t) {
   const chosen = game.select.chosen;
   const strip = H * 0.14;
@@ -792,6 +834,18 @@ function drawSelect(t) {
   ctx.fillRect(0, strip + 8, W / 2 - 12, H);
   ctx.fillStyle = '#04f04c';
   ctx.fillRect(W / 2 + 12, strip + 8, W / 2 - 12, H);
+  // grassy ground strip with flowers under the campers
+  const gt = assets.props['grass'];
+  for (let gx = 0; gx < W; gx += 64) ctx.drawImage(gt, gx, H - 56, 64, 64);
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(W / 2 - 12, H - 56, 24, 56);
+  const fl = [assets.props['flower-purple'], assets.props['flower-pink'], assets.props['flower-blue']];
+  for (let i = 0; i < 8; i++) {
+    ctx.drawImage(fl[i % 3], 40 + i * (W - 110) / 8 + (i % 2) * 18, H - 50 - (i % 2) * 10, 20, 22);
+  }
+  const tr = assets.props['tree'], tb = assets.props['tree-b'];
+  ctx.drawImage(tr, 10, H - 130, 96 * (tr.width / tr.height), 96);
+  ctx.drawImage(tb, W - 100, H - 130, 96 * (tb.width / tb.height), 96);
   drawCenterText('Choose Your Character!', W / 2, strip * 0.68, Math.min(48, W * 0.045), '#111');
 
   for (const [hero, label, cx] of [['pixely', 'Pixely', W * 0.25], ['emily', 'Emily', W * 0.75]]) {
