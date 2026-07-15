@@ -148,6 +148,7 @@ function startGame(hero) {
   game.caveUnlockT = 0;      // gate-burst animation timer at the cave mouth
   game.lockHintT = -99;
   game.keyGrab = null;       // active open-chest-and-lift-key celebration
+  game.escaping = false;     // true after beating the Queen — race to the exit
   game.rested = false;
   game.sleep = null;
   game.homeArm = 0;
@@ -286,12 +287,10 @@ function unlockHat(id) {
 const entityEvents = {
   onPickup: fromCave => {
     sfx.pickup();
-    if (fromCave) {
-      game.caveFinds++;
-      if (game.caveFinds >= 3) unlockHat('wizard');
-    }
+    if (fromCave) game.caveFinds++;
+    // treasures no longer win the game — they fuel tools/powers (Phase 2).
+    // You win by beating the Queen in the cave and escaping.
     game.score = game.carried + game.banked;
-    if (game.score >= 15) endGame(true);
   },
   onHeal: () => sfx.heal(),
   onRest: () => {
@@ -299,10 +298,7 @@ const entityEvents = {
     sfx.rest();
   },
   onBuff: () => sfx.buff(),
-  onBank: () => {
-    sfx.clink();
-    if (game.banked >= 8) unlockHat('party');
-  },
+  onBank: () => sfx.clink(), // banking treasure; powers arrive in Phase 2
   onDropLost: () => {
     game.score = game.carried + game.banked;
     sfx.drop();
@@ -323,9 +319,13 @@ const entityEvents = {
   },
   onQueenDown: () => {
     sfx.bossDown();
-    showBanner('QUEEN BONKED!');
-    game.shake = 0.5;
-    setTimeout(() => unlockHat('crown'), 1600); // let the boss banner land first
+    showBanner('QUEEN DEFEATED — grab your crown and RUN!');
+    game.shake = 0.6;
+    // the Crown: King Mode (invincible + fast) powers the escape to the exit
+    game.escaping = true;
+    game.hat = 'crown';
+    game.buffs.invuln = 999;
+    game.buffs.speed = 999;
   },
   onHurt: () => {
     game.shake = 0.3;
@@ -357,6 +357,8 @@ function updatePlay(dt) {
   // opening a key-chest: the lid lifts and the hero raises the key overhead
   if (game.keyGrab) {
     const kg = game.keyGrab;
+    p.moving = false;   // stand still (not the walk cycle) while celebrating
+    p.dir = 'down';
     kg.t += dt;
     if (!kg.awarded && kg.t >= 0.95) {
       kg.awarded = true;
@@ -437,7 +439,7 @@ function updatePlay(dt) {
   updateEntities(game, dt, entityEvents, layout);
   if (state !== 'PLAY') return;
 
-  game.shopOpen = !!(layout.chestZone && rectHas(layout.chestZone, p.x, p.y));
+  game.shopOpen = false; // the hat-shop panel is retired; powers come in Phase 2
 
   if (game.caveUnlockT > 0) game.caveUnlockT -= dt;
 
@@ -480,6 +482,7 @@ function updatePlay(dt) {
   if (game.inCave) {
     for (const exit of layout.exits) {
       if (rectHas(exit.rect, p.x, p.y)) {
+        if (game.escaping) { endGame(true); return; } // made it out — you win!
         return startFade(() => {
           game.inCave = false;
           const [zx, zy] = exit.to.split(',').map(Number);
@@ -543,7 +546,7 @@ function draw(t) {
     drawPlay(t);
   } else if (state === 'WIN') {
     drawMenuScreen('screen-win');
-    drawCenterText('Best: ' + game.best + ' treasures', W / 2, H * 0.8, 28, '#053305');
+    drawCenterText('You escaped the cave!  Treasures: ' + game.score, W / 2, H * 0.8, 26, '#053305');
     pulseText('TAP TO PLAY AGAIN', W / 2, H * 0.9, 32, t, '#053305');
   } else if (state === 'DIED') {
     drawMenuScreen('screen-died');
@@ -596,7 +599,7 @@ function drawPlay(t) {
     const layout = getLayout(zoneKey());
     ctx.drawImage(layout.ground, 0, 0);
     drawEntities(ctx, assets, game, t, layout, () => drawPlayer(t));
-    if (!game.inCave && !game.caveUnlocked && layout.caveDoor) drawCaveGate(layout.caveDoor);
+    if (!game.inCave && !game.caveUnlocked && layout.caveMouth) drawCaveGate(layout.caveMouth);
     if (game.keyGrab && !game.inCave) drawKeyLift();
     if (game.shopOpen) drawShop(layout);
     if (game.inCave) { // lantern-light darkness around the hero
@@ -623,34 +626,34 @@ function drawPlay(t) {
   }
 }
 
-// a closed metal park gate (barred, with a padlock) across the cave mouth
-function drawCaveGate(d) {
-  const x0 = d.x - 2, y0 = d.y - 2, w = d.w + 4, h = d.h + 6;
-  const cx = x0 + w / 2;
+// a closed metal park gate (barred, padlocked) fitted into the cave opening
+function drawCaveGate(m) {
+  const x0 = m.x, y0 = m.y, w = m.w, h = m.h, cx = x0 + w / 2;
   ctx.save();
-  // posts
+  // side frame set just inside the arch
   ctx.fillStyle = '#33333a';
-  ctx.fillRect(x0 - 6, y0, 7, h);
-  ctx.fillRect(x0 + w - 1, y0, 7, h);
-  // vertical bars
-  for (let bx = x0 + 5; bx < x0 + w - 4; bx += 13) {
-    ctx.fillStyle = '#5a5a62'; ctx.fillRect(bx, y0 + 3, 5, h - 8);
-    ctx.fillStyle = '#828290'; ctx.fillRect(bx, y0 + 3, 2, h - 8); // highlight
+  ctx.fillRect(x0 - 3, y0 - 2, 5, h + 2);
+  ctx.fillRect(x0 + w - 2, y0 - 2, 5, h + 2);
+  // vertical bars filling the opening
+  const gap = Math.max(9, w / 7);
+  for (let bx = x0 + 3; bx < x0 + w - 3; bx += gap) {
+    ctx.fillStyle = '#5a5a62'; ctx.fillRect(bx, y0, 4, h);
+    ctx.fillStyle = '#828290'; ctx.fillRect(bx, y0, 2, h); // highlight
   }
   // horizontal rails (top / middle / bottom)
   ctx.fillStyle = '#484850';
-  for (const ry of [y0 + 3, y0 + h * 0.5 - 3, y0 + h - 8]) ctx.fillRect(x0, ry, w, 6);
+  for (const ry of [y0, y0 + h * 0.5 - 3, y0 + h - 6]) ctx.fillRect(x0, ry, w, 6);
   ctx.fillStyle = '#6c6c78';
-  for (const ry of [y0 + 3, y0 + h * 0.5 - 3, y0 + h - 8]) ctx.fillRect(x0, ry, w, 2);
+  for (const ry of [y0, y0 + h * 0.5 - 3, y0 + h - 6]) ctx.fillRect(x0, ry, w, 2);
   // center seam where the two gate halves meet
-  ctx.fillStyle = '#2a2a30'; ctx.fillRect(cx - 2, y0 + 2, 4, h - 4);
-  // padlock hanging where they meet
-  const ly = y0 + h * 0.5 + 4;
-  ctx.strokeStyle = '#b8901f'; ctx.lineWidth = 5; ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.arc(cx, ly - 3, 8, Math.PI, 0); ctx.stroke();
-  ctx.fillStyle = '#ffd84d'; ctx.fillRect(cx - 12, ly + 1, 24, 18);
-  ctx.fillStyle = '#c9a227'; ctx.fillRect(cx - 12, ly + 1, 24, 3);
-  ctx.fillStyle = '#7a5a10'; ctx.fillRect(cx - 3, ly + 7, 6, 8);
+  ctx.fillStyle = '#2a2a30'; ctx.fillRect(cx - 2, y0, 4, h);
+  // padlock hanging in the middle
+  const ly = y0 + h * 0.5 + 2;
+  ctx.strokeStyle = '#b8901f'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(cx, ly - 2, 7, Math.PI, 0); ctx.stroke();
+  ctx.fillStyle = '#ffd84d'; ctx.fillRect(cx - 10, ly + 1, 20, 16);
+  ctx.fillStyle = '#c9a227'; ctx.fillRect(cx - 10, ly + 1, 20, 3);
+  ctx.fillStyle = '#7a5a10'; ctx.fillRect(cx - 2, ly + 6, 4, 7);
   ctx.restore();
 }
 
@@ -665,6 +668,17 @@ function drawKeyLift() {
   const fromX = kg.kc.x, fromY = kg.kc.y - 34;
   const kx = fromX + (headX - fromX) * e;
   const ky = fromY + (headY - fromY) * e - (kg.t > 0.9 ? Math.sin((kg.t - 0.9) * 8) * 3 : 0);
+  // raised arms reaching up toward the key once it's near the head
+  if (kg.t > 0.55) {
+    const sh = p.y - HERO_HEIGHT * 0.18; // shoulder height
+    ctx.strokeStyle = '#e8b98a';
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(p.x - 12, sh); ctx.lineTo(kx - 6, ky + 6);
+    ctx.moveTo(p.x + 12, sh); ctx.lineTo(kx + 6, ky + 6);
+    ctx.stroke();
+  }
   const kh = 36, kw = kh * (key.width / key.height);
   ctx.drawImage(key, kx - kw / 2, ky - kh / 2, kw, kh);
   if (kg.t > 0.9) { // triumphant sparkles
@@ -908,7 +922,9 @@ function drawHud() {
 // one-line "what to do next" tracker under the minimap
 function drawQuest() {
   let text;
-  if (game.keys < TOTAL_KEYS) text = 'Clear zones to find keys: ' + game.keys + '/' + TOTAL_KEYS;
+  if (game.escaping) text = 'ESCAPE! Run to the ladder!';
+  else if (game.inCave) text = 'Find and defeat the Queen!';
+  else if (game.keys < TOTAL_KEYS) text = 'Clear zones to find keys: ' + game.keys + '/' + TOTAL_KEYS;
   else if (!game.caveUnlocked) text = 'Open the cave in The Old Cave!';
   else text = 'Enter the cave!';
   const y = 12 + view.safe.t + (3 * 16 + 2 * 3 + 12) + 20;

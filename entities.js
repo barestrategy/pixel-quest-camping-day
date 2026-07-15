@@ -61,14 +61,17 @@ export function enterZone(game, layout) {
       item.x = pos.x; item.y = pos.y; item.placed = true;
     }
   }
-  // a cleared zone stays peaceful — no ants respawn once you've won its key
-  if (key === SAFE_ZONE || (game.clearedZones && game.clearedZones.has(key))) return;
+  if (key === SAFE_ZONE) return; // only the campsite is safe; every other zone stays alive
   const n = ANT_COUNTS[key] || 2;
   for (let i = 0; i < n; i++) {
     const pos = randomOpenSpot(layout, 60, p, 280);
     game.ants.push({ x: pos.x, y: pos.y, heading: rand(0, Math.PI * 2), turnT: rand(0.6, 2), queen: false });
   }
-  // The Queen no longer roams the overworld — she waits deep in the cave (Phase 3+).
+  // the Queen waits in the cave — beat her to trigger the escape
+  if (key === 'U' && !game.queenDown) {
+    const pos = randomOpenSpot(layout, 90, p, 360);
+    game.ants.push({ x: pos.x, y: pos.y, heading: rand(0, Math.PI * 2), turnT: 1, queen: true, hp: 5, state: 'wander', stateT: 0 });
+  }
 }
 
 // A zone is cleared the instant its last non-queen ant is down; drop a key-chest.
@@ -238,7 +241,6 @@ export function updateEntities(game, dt, events, layout) {
       continue;
     }
     if (a.gone) {
-      if (game.clearedZones.has(key)) continue; // cleared zone: stay gone for good
       a.respawnT -= dt;
       if (a.respawnT <= 0) {
         const pos = randomOpenSpot(layout, 60, p, 300);

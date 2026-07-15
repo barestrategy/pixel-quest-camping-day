@@ -107,6 +107,8 @@ function caveWithDoor(L, img, cx, footY, h) {
   L.colliders.push({ x: cx + doorW / 2, y: wallY, w: p.x + p.w - (cx + doorW / 2), h: h * 0.52 });
   L.colliders.push({ x: p.x + p.w * 0.06, y: footY - h * 0.86, w: p.w * 0.88, h: h * 0.38 }); // back wall
   L.caveDoor = { x: cx - doorW / 2, y: footY - h * 0.4, w: doorW, h: h * 0.4 + 22 };
+  // the actual dark opening in the drawn cave sprite, so the gate fits snugly
+  L.caveMouth = { x: p.x + p.w * 0.33, y: p.y + p.h * 0.60, w: p.w * 0.34, h: p.h * 0.40 };
   return p;
 }
 
