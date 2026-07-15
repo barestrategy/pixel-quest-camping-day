@@ -4,7 +4,7 @@ import { W, H } from './assets.js';
 
 export const ZONE_DEFS = {
   '0,0': { name: 'Rocky Grove', type: 'rocks' },
-  '1,0': { name: "Queen's Clearing", type: 'battlefield' },
+  '1,0': { name: 'The Old Cave', type: 'battlefield' },
   '2,0': { name: 'Deep Woods', type: 'darkwoods' },
   '0,1': { name: 'Willow Bend', type: 'riverbend' },
   '1,1': { name: 'The Campsite', type: 'campsite' },
@@ -311,7 +311,8 @@ function buildCaveLayout(assets) {
   };
   const ex1 = { x: W * 0.14, y: H * 0.5 }, ex2 = { x: W * 0.86, y: H * 0.5 };
   ladder(ex1.x, ex1.y); ladder(ex2.x, ex2.y);
-  L.exits.push({ rect: { x: ex1.x - 40, y: ex1.y - 50, w: 80, h: 100 }, to: '1,1' });
+  // both ladders now lead back up to The Old Cave (the campsite cave is gone)
+  L.exits.push({ rect: { x: ex1.x - 40, y: ex1.y - 50, w: 80, h: 100 }, to: '1,0' });
   L.exits.push({ rect: { x: ex2.x - 40, y: ex2.y - 50, w: 80, h: 100 }, to: '1,0' });
   L.ground = c;
   return L;
@@ -352,8 +353,9 @@ export function buildZoneLayout(key, assets) {
 
   if (def.type === 'campsite') {
     river(L, rng, true, W * 0.72, H * 0.5, assets);
-    caveWithDoor(L, P['cave-dark'], W * 0.17, H * 0.26, 132);
-    addProp(L, P['sign-goin'], W * 0.17 + 125, H * 0.26, P['sign-goin'].height, { solid: false });
+    // the cave used to be here — now it's just a leafy corner of camp
+    addProp(L, P['tree'], W * 0.14, H * 0.24, 118);
+    addProp(L, P['tree-b'], W * 0.24, H * 0.2, 104);
     addProp(L, P['well'], W * 0.46, H * 0.44, 88, { bw: 0.8, bh: 0.4 });
     addProp(L, P['pine'], W * 0.35, H * 0.33, 160);
     // home sweet home: tent (walk in to rest), bonfire, treasure chest

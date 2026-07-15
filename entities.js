@@ -5,18 +5,24 @@ import { blockedAt, moveWithCollision, randomOpenSpot, findOpenNear } from './zo
 const ITEM_RADIUS = 26;
 const ANT_SIZE = 52;          // regular ant height in world px
 const QUEEN_SIZE = 110;
-const ANT_WANDER_SPEED = 90;
-const ANT_CHASE_SPEED = 150;  // slower than the player's 220 so escape is possible
-const QUEEN_CHASE_SPEED = 195;
-const ANT_AGGRO = 220;
+// v3: the world is meaner — more, faster, more-alert ants (player speed is 220)
+const ANT_WANDER_SPEED = 105;
+const ANT_CHASE_SPEED = 175;  // still under the player's 220 so escape stays possible
+const QUEEN_CHASE_SPEED = 215;
+const ANT_AGGRO = 260;
 const QUEEN_AGGRO = 320;
 const QUEEN_ZONE = '1,0';
 const SAFE_ZONE = '1,1';
 
 export const OUTER_ZONES = ['0,0', '1,0', '2,0', '0,1', '2,1', '0,2', '1,2', '2,2'];
 
-// deterministic ant count per zone (queen zone gets the queen + 1)
-const ANT_COUNTS = { '0,0': 2, '1,0': 1, '2,0': 3, '0,1': 1, '2,1': 2, '0,2': 3, '1,2': 2, '2,2': 3, 'U': 1 };
+// The 7 zones (all but the campsite and the cave-entrance zone) each hide a key:
+// bonk every ant in the zone and a key-chest appears.
+export const KEY_ZONES = ['0,0', '2,0', '0,1', '2,1', '0,2', '1,2', '2,2'];
+export const TOTAL_KEYS = KEY_ZONES.length;
+
+// deterministic ant count per zone (~+1 vs v2; queen zone gets the queen too)
+const ANT_COUNTS = { '0,0': 3, '1,0': 2, '2,0': 4, '0,1': 2, '2,1': 3, '0,2': 4, '1,2': 3, '2,2': 4, 'U': 2 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const keyOf = g => g.inCave ? 'U' : g.zone.x + ',' + g.zone.y;
@@ -35,6 +41,7 @@ export function initItems(game) {
   // tunnel treasure: three collectible crystals glinting in the dark
   for (let i = 0; i < 3; i++) game.items.push({ zone: 'U', x: 0, y: 0, placed: false });
   game.drops = [];
+  game.keyChests = [];   // key-chests spawned by clearing a zone; persist until grabbed
   game.particles = [];
   game.floats = [];
   game.ants = [];
@@ -54,7 +61,8 @@ export function enterZone(game, layout) {
       item.x = pos.x; item.y = pos.y; item.placed = true;
     }
   }
-  if (key === SAFE_ZONE) return;
+  // a cleared zone stays peaceful — no ants respawn once you've won its key
+  if (key === SAFE_ZONE || (game.clearedZones && game.clearedZones.has(key))) return;
   const n = ANT_COUNTS[key] || 2;
   for (let i = 0; i < n; i++) {
     const pos = randomOpenSpot(layout, 60, p, 280);
@@ -62,8 +70,19 @@ export function enterZone(game, layout) {
   }
   if (key === QUEEN_ZONE && !game.queenDown) {
     const pos = randomOpenSpot(layout, 80, p, 340);
-    game.ants.push({ x: pos.x, y: pos.y, heading: rand(0, Math.PI * 2), turnT: 1, queen: true, hp: 3, state: 'wander', stateT: 0 });
+    game.ants.push({ x: pos.x, y: pos.y, heading: rand(0, Math.PI * 2), turnT: 1, queen: true, hp: 5, state: 'wander', stateT: 0 });
   }
+}
+
+// A zone is cleared the instant its last non-queen ant is down; drop a key-chest.
+function checkZoneCleared(game, layout, events) {
+  const key = keyOf(game);
+  if (!KEY_ZONES.includes(key) || game.clearedZones.has(key)) return;
+  if (game.ants.some(a => !a.queen && !a.bonked && !a.gone)) return; // still some up
+  game.clearedZones.add(key);
+  const pos = randomOpenSpot(layout, 90, game.player, 150);
+  game.keyChests.push({ zone: key, x: pos.x, y: pos.y, t: 0, collected: false });
+  events.onZoneCleared();
 }
 
 // The hero swings in their facing direction; nearby ants get bonked.
@@ -103,6 +122,7 @@ export function bonkAttack(game, events, layout) {
       a.respawnT = rand(6, 10);
       burst(game, a.x, a.y, '#fff', 8);
       events.onBonk();
+      checkZoneCleared(game, layout, events);
     }
   }
 }
@@ -175,6 +195,20 @@ export function updateEntities(game, dt, events, layout) {
   }
   game.drops = game.drops.filter(dr => !dr.collected);
 
+  // key-chest: appears when you clear a zone; walk in to claim the key
+  for (const kc of game.keyChests) {
+    if (kc.zone !== key || kc.collected) continue;
+    kc.t += dt;
+    if (kc.t > 0.4 && Math.hypot(kc.x - p.x, kc.y - p.y) < 46) {
+      kc.collected = true;
+      game.keys++;
+      events.onKey();
+      burst(game, kc.x, kc.y, '#ffd84d', 18);
+      game.floats.push({ x: kc.x, y: kc.y - 26, text: 'KEY! ' + game.keys + '/' + TOTAL_KEYS, life: 1.7, color: '#ffe14d' });
+    }
+  }
+  game.keyChests = game.keyChests.filter(kc => !kc.collected);
+
   // tent: step inside to sleep (game.js runs the night-time sequence)
   if (layout.tentDoor && rectHas(layout.tentDoor, p.x, p.y)) {
     if (game.hearts < 6 && !game.rested && !game.sleep) {
@@ -207,6 +241,7 @@ export function updateEntities(game, dt, events, layout) {
       continue;
     }
     if (a.gone) {
+      if (game.clearedZones.has(key)) continue; // cleared zone: stay gone for good
       a.respawnT -= dt;
       if (a.respawnT <= 0) {
         const pos = randomOpenSpot(layout, 60, p, 300);
@@ -245,7 +280,7 @@ export function updateEntities(game, dt, events, layout) {
           a.heading = Math.atan2(dy, dx);
         }
       } else if (a.state === 'charge') {
-        speed = 430;
+        speed = 470;
         if (a.stateT <= 0) { a.state = 'cooldown'; a.stateT = 1.3; }
       } else if (a.state === 'cooldown') {
         speed = 70;
@@ -370,6 +405,11 @@ export function drawEntities(ctx, assets, game, t, layout, drawPlayerFn) {
     drawables.push({ baseY: dr.y + 18, draw: () => drawDrop(ctx, assets, dr, t) });
   }
 
+  for (const kc of game.keyChests) {
+    if (kc.zone !== key || kc.collected) continue;
+    drawables.push({ baseY: kc.y + 20, draw: () => drawKeyChest(ctx, assets, kc, t) });
+  }
+
   for (const a of game.ants) {
     if (a.gone) continue;
     drawables.push({ baseY: a.y + (a.queen ? QUEEN_SIZE : ANT_SIZE) / 2, draw: () => drawAnt(ctx, assets, a, t) });
@@ -421,6 +461,30 @@ function drawHeartAt(ctx, cx, cy, px) {
   }
   ctx.fillStyle = '#ff9aa8'; // glint
   ctx.fillRect(cx - 2 * px, cy - 2 * px, px, px);
+}
+
+function drawKeyChest(ctx, assets, kc, t) {
+  const pop = Math.min(1, kc.t / 0.3);           // spawn scale-up
+  const e = pop < 1 ? 1 - (1 - pop) * (1 - pop) : 1; // ease-out
+  const chest = assets.props['chest'];
+  const h = 52 * (0.4 + e * 0.6), w = h * (chest.width / chest.height);
+  // glow pool
+  const g = ctx.createRadialGradient(kc.x, kc.y, 6, kc.x, kc.y, 60);
+  g.addColorStop(0, 'rgba(255,216,77,0.35)');
+  g.addColorStop(1, 'rgba(255,216,77,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(kc.x - 60, kc.y - 60, 120, 120);
+  ctx.drawImage(chest, kc.x - w / 2, kc.y - h + 8, w, h);
+  // floating key bobbing above
+  const key = assets.props['key'];
+  const kh = 30, kw = kh * (key.width / key.height);
+  const bob = Math.sin(t * 0.005) * 5;
+  ctx.drawImage(key, kc.x - kw / 2, kc.y - h - 26 + bob, kw, kh);
+  // sparkle
+  if ((t * 0.003 + kc.x * 0.1) % 1 < 0.4) {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(kc.x + 16, kc.y - h - 20 + bob, 3, 3);
+  }
 }
 
 function drawDrop(ctx, assets, dr, t) {

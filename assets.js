@@ -518,6 +518,25 @@ function makeObelisk() {
   return c;
 }
 
+// a chunky gold key (used on the key-chest and the HUD counter)
+function makeKey() {
+  const c = mk(34, 20);
+  const x = c.getContext('2d');
+  x.fillStyle = '#3a2c08'; // outline
+  x.fillRect(2, 4, 16, 12);
+  x.fillRect(18, 8, 14, 4);
+  x.fillRect(26, 12, 3, 5);
+  x.fillRect(30, 12, 3, 5);
+  x.fillStyle = '#ffd84d'; // gold
+  x.fillRect(4, 6, 12, 8);
+  x.fillRect(18, 9, 12, 2);
+  x.fillStyle = '#8a6a10'; // ring hole
+  x.fillRect(7, 8, 5, 4);
+  x.fillStyle = '#fff2a8'; // glint
+  x.fillRect(5, 6, 3, 2);
+  return c;
+}
+
 // leafy bush — replaces mushroom decor (looked too much like the collectible)
 function makeBush() {
   const c = mk(34, 26);
@@ -577,6 +596,7 @@ export async function loadAssets() {
   props['sparkle'] = makeSparkleProp();
   props['lantern'] = makeLantern();
   props['chest'] = makeChest();
+  props['key'] = makeKey();
   props['obelisk'] = makeObelisk();
   props['sign-goin'] = makeSign(['GO IN', 'HERE!']);
   props['sign-motivation'] = makeSign(['THIS IS', 'MOTIVATION']);

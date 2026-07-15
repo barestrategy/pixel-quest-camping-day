@@ -1,7 +1,7 @@
 // Pixel Quest Camping Day — main loop and state machine.
 import { W, H, setWorldWidth, loadAssets } from './assets.js';
 import { input, initInput, getMove, takeTap, clearFrameFlags, drawJoystick } from './input.js';
-import { initItems, enterZone, updateEntities, drawEntities, bonkAttack } from './entities.js';
+import { initItems, enterZone, updateEntities, drawEntities, bonkAttack, TOTAL_KEYS } from './entities.js';
 import { ZONE_DEFS, buildZoneLayout, snapshotLayout, moveWithCollision, blockedAt, randomOpenSpot, findOpenNear } from './zonegen.js';
 import { unlock, setTheme, sfx, toggleMute, isMuted } from './audio.js';
 
@@ -142,6 +142,11 @@ function startGame(hero) {
   game.carried = 0;
   game.banked = 0;
   game.caveFinds = 0;
+  game.keys = 0;
+  game.clearedZones = new Set();
+  game.caveUnlocked = false;
+  game.caveUnlockT = 0;      // chain-burst animation timer at the cave mouth
+  game.lockHintT = -99;
   game.rested = false;
   game.sleep = null;
   game.homeArm = 0;
@@ -305,6 +310,15 @@ const entityEvents = {
     sfx.bonk();
     game.shake = Math.max(game.shake, 0.15);
   },
+  onZoneCleared: () => {
+    sfx.buff();
+    showBanner('Zone cleared — grab the key!');
+  },
+  onKey: () => {
+    sfx.clink();
+    game.shake = Math.max(game.shake, 0.2);
+    if (game.keys >= TOTAL_KEYS) showBanner('All keys found — open the cave!');
+  },
   onQueenRoar: () => sfx.buzz(),
   onQueenHit: () => {
     sfx.bossHit();
@@ -413,8 +427,35 @@ function updatePlay(dt) {
 
   game.shopOpen = !!(layout.chestZone && rectHas(layout.chestZone, p.x, p.y));
 
-  // cave doorways lead underground; ladders lead back up
+  if (game.caveUnlockT > 0) game.caveUnlockT -= dt;
+
+  // the cave is chained shut until all 7 keys are found
   if (!game.inCave && layout.caveDoor && rectHas(layout.caveDoor, p.x, p.y)) {
+    const d = layout.caveDoor, cx = d.x + d.w / 2, cy = d.y + d.h / 2;
+    if (!game.caveUnlocked) {
+      if (game.keys >= TOTAL_KEYS) {
+        // burst the chains open — a one-time celebration, then step in to enter
+        game.caveUnlocked = true;
+        game.caveUnlockT = 1;
+        game.shake = 0.4;
+        sfx.clink();
+        showBanner('The cave creaks open!');
+        for (let i = 0; i < 26; i++) {
+          const a = Math.random() * Math.PI * 2, s = 120 + Math.random() * 260;
+          game.particles.push({ x: cx, y: cy, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60, life: 0.5 + Math.random() * 0.4, color: ['#8b867c', '#6e695f', '#c9c4b8'][i % 3] });
+        }
+        p.y = d.y + d.h + 26; // nudge out so you don't enter on the same touch
+        return;
+      }
+      // still locked: show what's needed and block
+      if (stateTime - game.lockHintT > 1.8) {
+        game.lockHintT = stateTime;
+        game.floats.push({ x: cx, y: d.y - 6, text: 'Need ' + TOTAL_KEYS + ' keys! (' + game.keys + '/' + TOTAL_KEYS + ')', life: 1.8, color: '#fff' });
+      }
+      p.y = d.y + d.h + 26;
+      return;
+    }
+    // unlocked → descend
     const from = zoneKey();
     return startFade(() => {
       game.inCave = true;
@@ -543,6 +584,7 @@ function drawPlay(t) {
     const layout = getLayout(zoneKey());
     ctx.drawImage(layout.ground, 0, 0);
     drawEntities(ctx, assets, game, t, layout, () => drawPlayer(t));
+    if (!game.inCave && !game.caveUnlocked && layout.caveDoor) drawCaveLock(layout.caveDoor);
     if (game.shopOpen) drawShop(layout);
     if (game.inCave) { // lantern-light darkness around the hero
       const p = game.player;
@@ -566,6 +608,41 @@ function drawPlay(t) {
     ctx.fillStyle = 'rgba(0,0,0,' + Math.min(1, a * 1.25) + ')';
     ctx.fillRect(-20, -20, W + 40, H + 40);
   }
+}
+
+// chain + padlock drawn across the cave mouth until all keys are collected
+function drawCaveLock(d) {
+  const cx = d.x + d.w / 2, cy = d.y + d.h / 2;
+  ctx.save();
+  ctx.strokeStyle = '#4a4038';
+  ctx.lineWidth = 9;
+  ctx.lineCap = 'round';
+  // two crossed chains
+  for (const [x1, x2] of [[d.x - 6, d.x + d.w + 6], [d.x + d.w + 6, d.x - 6]]) {
+    ctx.beginPath();
+    ctx.moveTo(x1, d.y);
+    ctx.lineTo(x2, d.y + d.h);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#7a6f60'; // link highlight
+  ctx.lineWidth = 3;
+  for (const [x1, x2] of [[d.x - 6, d.x + d.w + 6], [d.x + d.w + 6, d.x - 6]]) {
+    ctx.beginPath();
+    ctx.moveTo(x1, d.y);
+    ctx.lineTo(x2, d.y + d.h);
+    ctx.stroke();
+  }
+  // padlock in the middle
+  ctx.strokeStyle = '#c9a227';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.arc(cx, cy - 12, 9, Math.PI, 0);
+  ctx.stroke();
+  ctx.fillStyle = '#ffd84d';
+  ctx.fillRect(cx - 14, cy - 6, 28, 22);
+  ctx.fillStyle = '#7a5a10';
+  ctx.fillRect(cx - 3, cy + 1, 6, 10);
+  ctx.restore();
 }
 
 function drawBanner() {
@@ -774,19 +851,43 @@ function drawHud() {
   ctx.fillStyle = '#fff';
   ctx.strokeStyle = 'rgba(0,0,0,0.7)';
   ctx.lineWidth = 5;
-  const scoreText = game.score + '/15';
+  const scoreText = String(game.score);
   ctx.strokeText(scoreText, sx + cw + 8, sy + ch - 8);
   ctx.fillText(scoreText, sx + cw + 8, sy + ch - 8);
+  // key counter
+  const keyImg = assets.props['key'];
+  const kh = 22, kw = kh * (keyImg.width / keyImg.height);
+  ctx.drawImage(keyImg, sx, sy + 40, kw, kh);
+  ctx.font = 'bold 24px "Courier New", monospace';
+  ctx.strokeText(game.keys + '/' + TOTAL_KEYS, sx + kw + 8, sy + 60);
+  ctx.fillText(game.keys + '/' + TOTAL_KEYS, sx + kw + 8, sy + 60);
   // banked treasure marker
   if (game.banked > 0) {
     const chest = assets.props['chest'];
-    const chH = 26, chW = chH * (chest.width / chest.height);
-    ctx.drawImage(chest, sx, sy + 38, chW, chH);
-    ctx.font = 'bold 22px "Courier New", monospace';
-    ctx.strokeText('x' + game.banked, sx + chW + 6, sy + 58);
-    ctx.fillText('x' + game.banked, sx + chW + 6, sy + 58);
+    const chH = 24, chW = chH * (chest.width / chest.height);
+    ctx.drawImage(chest, sx, sy + 68, chW, chH);
+    ctx.font = 'bold 20px "Courier New", monospace';
+    ctx.strokeText('x' + game.banked, sx + chW + 6, sy + 86);
+    ctx.fillText('x' + game.banked, sx + chW + 6, sy + 86);
   }
   drawMinimap();
+  drawQuest();
+}
+
+// one-line "what to do next" tracker under the minimap
+function drawQuest() {
+  let text;
+  if (game.keys < TOTAL_KEYS) text = 'Clear zones to find keys: ' + game.keys + '/' + TOTAL_KEYS;
+  else if (!game.caveUnlocked) text = 'Open the cave in The Old Cave!';
+  else text = 'Enter the cave!';
+  const y = 12 + view.safe.t + (3 * 16 + 2 * 3 + 12) + 20;
+  ctx.font = 'bold 18px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  const w = ctx.measureText(text).width + 24;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(W / 2 - w / 2, y - 15, w, 24);
+  ctx.fillStyle = '#ffe9a8';
+  ctx.fillText(text, W / 2, y + 3);
 }
 
 // Menu art has flat backgrounds: extend the color edge-to-edge, contain-fit the art.
