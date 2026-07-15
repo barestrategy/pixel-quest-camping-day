@@ -156,6 +156,10 @@ export const sfx = {
     blip(1320, 0.06, t0, 'square', 0.08);
     blip(1760, 0.09, t0 + 0.07, 'square', 0.08);
   },
+  creak() {
+    if (!ctx) return;
+    blip(300, 0.28, ctx.currentTime, 'sawtooth', 0.09, 150); // wooden chest lid
+  },
   drop() {
     if (!ctx) return;
     blip(330, 0.2, ctx.currentTime, 'square', 0.12, 140);

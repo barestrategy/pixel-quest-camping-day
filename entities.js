@@ -68,10 +68,7 @@ export function enterZone(game, layout) {
     const pos = randomOpenSpot(layout, 60, p, 280);
     game.ants.push({ x: pos.x, y: pos.y, heading: rand(0, Math.PI * 2), turnT: rand(0.6, 2), queen: false });
   }
-  if (key === QUEEN_ZONE && !game.queenDown) {
-    const pos = randomOpenSpot(layout, 80, p, 340);
-    game.ants.push({ x: pos.x, y: pos.y, heading: rand(0, Math.PI * 2), turnT: 1, queen: true, hp: 5, state: 'wander', stateT: 0 });
-  }
+  // The Queen no longer roams the overworld — she waits deep in the cave (Phase 3+).
 }
 
 // A zone is cleared the instant its last non-queen ant is down; drop a key-chest.
@@ -195,16 +192,16 @@ export function updateEntities(game, dt, events, layout) {
   }
   game.drops = game.drops.filter(dr => !dr.collected);
 
-  // key-chest: appears when you clear a zone; walk in to claim the key
+  // key-chest: appears closed when you clear a zone; touching it starts the
+  // open-and-lift sequence (game.js drives the animation + awards the key)
   for (const kc of game.keyChests) {
     if (kc.zone !== key || kc.collected) continue;
     kc.t += dt;
-    if (kc.t > 0.4 && Math.hypot(kc.x - p.x, kc.y - p.y) < 46) {
-      kc.collected = true;
-      game.keys++;
-      events.onKey();
-      burst(game, kc.x, kc.y, '#ffd84d', 18);
-      game.floats.push({ x: kc.x, y: kc.y - 26, text: 'KEY! ' + game.keys + '/' + TOTAL_KEYS, life: 1.7, color: '#ffe14d' });
+    if (!kc.opening && kc.t > 0.35 && !game.keyGrab && Math.hypot(kc.x - p.x, kc.y - p.y) < 50) {
+      kc.opening = true;
+      game.keyGrab = { kc, t: 0, awarded: false };
+      events.onChestOpen();
+      burst(game, kc.x, kc.y - 14, '#ffd84d', 10);
     }
   }
   game.keyChests = game.keyChests.filter(kc => !kc.collected);
@@ -407,7 +404,7 @@ export function drawEntities(ctx, assets, game, t, layout, drawPlayerFn) {
 
   for (const kc of game.keyChests) {
     if (kc.zone !== key || kc.collected) continue;
-    drawables.push({ baseY: kc.y + 20, draw: () => drawKeyChest(ctx, assets, kc, t) });
+    drawables.push({ baseY: kc.y + 20, draw: () => drawKeyChest(ctx, assets, game, kc, t) });
   }
 
   for (const a of game.ants) {
@@ -463,27 +460,46 @@ function drawHeartAt(ctx, cx, cy, px) {
   ctx.fillRect(cx - 2 * px, cy - 2 * px, px, px);
 }
 
-function drawKeyChest(ctx, assets, kc, t) {
-  const pop = Math.min(1, kc.t / 0.3);           // spawn scale-up
-  const e = pop < 1 ? 1 - (1 - pop) * (1 - pop) : 1; // ease-out
-  const chest = assets.props['chest'];
-  const h = 52 * (0.4 + e * 0.6), w = h * (chest.width / chest.height);
+// Closed treasure chest that pops in, then opens its lid when grabbed.
+// The key stays hidden inside until the lid lifts (game.js floats it overhead).
+function drawKeyChest(ctx, assets, game, kc, t) {
+  const pop = Math.min(1, kc.t / 0.3);
+  const e = pop < 1 ? 1 - (1 - pop) * (1 - pop) : 1; // ease-out scale-in
+  const cx = kc.x, cy = kc.y;
+  const w = 52 * (0.5 + e * 0.5), h = w * 0.82;
+  // open progress (0 closed -> 1 fully open) from the grab sequence
+  const grab = game.keyGrab && game.keyGrab.kc === kc ? game.keyGrab : null;
+  const open = grab ? Math.min(1, grab.t / 0.35) : 0;
   // glow pool
-  const g = ctx.createRadialGradient(kc.x, kc.y, 6, kc.x, kc.y, 60);
-  g.addColorStop(0, 'rgba(255,216,77,0.35)');
+  const g = ctx.createRadialGradient(cx, cy, 6, cx, cy, 58);
+  g.addColorStop(0, 'rgba(255,216,77,' + (0.25 + open * 0.3) + ')');
   g.addColorStop(1, 'rgba(255,216,77,0)');
   ctx.fillStyle = g;
-  ctx.fillRect(kc.x - 60, kc.y - 60, 120, 120);
-  ctx.drawImage(chest, kc.x - w / 2, kc.y - h + 8, w, h);
-  // floating key bobbing above
-  const key = assets.props['key'];
-  const kh = 30, kw = kh * (key.width / key.height);
-  const bob = Math.sin(t * 0.005) * 5;
-  ctx.drawImage(key, kc.x - kw / 2, kc.y - h - 26 + bob, kw, kh);
-  // sparkle
-  if ((t * 0.003 + kc.x * 0.1) % 1 < 0.4) {
+  ctx.fillRect(cx - 58, cy - 58, 116, 116);
+  const bx = cx - w / 2, by = cy - h;
+  // base box
+  ctx.fillStyle = '#5c3a1c'; ctx.fillRect(bx - 2, by + h * 0.32 - 2, w + 4, h * 0.68 + 4);
+  ctx.fillStyle = '#8a5230'; ctx.fillRect(bx, by + h * 0.32, w, h * 0.68);
+  ctx.fillStyle = '#3d2610'; ctx.fillRect(bx + w * 0.16, by + h * 0.32, w * 0.1, h * 0.68);
+  ctx.fillRect(bx + w * 0.74, by + h * 0.32, w * 0.1, h * 0.68);
+  if (open > 0) { // dark interior + gold shimmer once ajar
+    ctx.fillStyle = '#241606'; ctx.fillRect(bx + 4, by + h * 0.3, w - 8, h * 0.14);
+    ctx.fillStyle = 'rgba(255,224,120,' + (0.4 * open) + ')'; ctx.fillRect(bx + 6, by + h * 0.31, w - 12, 4);
+  }
+  // lid — hinged at its back, lifts up by ~110° when opening
+  ctx.save();
+  ctx.translate(cx, by + h * 0.34);
+  ctx.rotate(-open * 1.9);
+  ctx.fillStyle = '#5c3a1c'; ctx.fillRect(-w / 2 - 2, -h * 0.36 - 2, w + 4, h * 0.36 + 4);
+  ctx.fillStyle = '#a06238'; ctx.fillRect(-w / 2, -h * 0.36, w, h * 0.36);
+  ctx.fillStyle = '#c17c48'; ctx.fillRect(-w / 2, -h * 0.36, w, 4);
+  ctx.restore();
+  // lock (gone once open)
+  if (open < 0.2) { ctx.fillStyle = '#ffd84d'; ctx.fillRect(cx - 5, by + h * 0.28, 10, 12); }
+  // sparkle on the closed chest
+  if (!grab && (t * 0.003 + cx * 0.1) % 1 < 0.35) {
     ctx.fillStyle = '#fff';
-    ctx.fillRect(kc.x + 16, kc.y - h - 20 + bob, 3, 3);
+    ctx.fillRect(cx + 14, by - 6, 3, 3);
   }
 }
 

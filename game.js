@@ -145,8 +145,9 @@ function startGame(hero) {
   game.keys = 0;
   game.clearedZones = new Set();
   game.caveUnlocked = false;
-  game.caveUnlockT = 0;      // chain-burst animation timer at the cave mouth
+  game.caveUnlockT = 0;      // gate-burst animation timer at the cave mouth
   game.lockHintT = -99;
+  game.keyGrab = null;       // active open-chest-and-lift-key celebration
   game.rested = false;
   game.sleep = null;
   game.homeArm = 0;
@@ -312,13 +313,9 @@ const entityEvents = {
   },
   onZoneCleared: () => {
     sfx.buff();
-    showBanner('Zone cleared — grab the key!');
+    showBanner('Zone cleared — open the chest!');
   },
-  onKey: () => {
-    sfx.clink();
-    game.shake = Math.max(game.shake, 0.2);
-    if (game.keys >= TOTAL_KEYS) showBanner('All keys found — open the cave!');
-  },
+  onChestOpen: () => sfx.creak(),
   onQueenRoar: () => sfx.buzz(),
   onQueenHit: () => {
     sfx.bossHit();
@@ -354,6 +351,21 @@ function updatePlay(dt) {
       sfx.heal();
     }
     if (s.t >= s.dur) game.sleep = null;
+    return;
+  }
+
+  // opening a key-chest: the lid lifts and the hero raises the key overhead
+  if (game.keyGrab) {
+    const kg = game.keyGrab;
+    kg.t += dt;
+    if (!kg.awarded && kg.t >= 0.95) {
+      kg.awarded = true;
+      game.keys++;
+      sfx.clink();
+      game.shake = Math.max(game.shake, 0.2);
+      showBanner(game.keys >= TOTAL_KEYS ? 'All keys — open the cave!' : 'Got a key!  ' + game.keys + '/' + TOTAL_KEYS);
+    }
+    if (kg.t >= 1.7) { kg.kc.collected = true; game.keyGrab = null; }
     return;
   }
 
@@ -584,7 +596,8 @@ function drawPlay(t) {
     const layout = getLayout(zoneKey());
     ctx.drawImage(layout.ground, 0, 0);
     drawEntities(ctx, assets, game, t, layout, () => drawPlayer(t));
-    if (!game.inCave && !game.caveUnlocked && layout.caveDoor) drawCaveLock(layout.caveDoor);
+    if (!game.inCave && !game.caveUnlocked && layout.caveDoor) drawCaveGate(layout.caveDoor);
+    if (game.keyGrab && !game.inCave) drawKeyLift();
     if (game.shopOpen) drawShop(layout);
     if (game.inCave) { // lantern-light darkness around the hero
       const p = game.player;
@@ -610,39 +623,57 @@ function drawPlay(t) {
   }
 }
 
-// chain + padlock drawn across the cave mouth until all keys are collected
-function drawCaveLock(d) {
-  const cx = d.x + d.w / 2, cy = d.y + d.h / 2;
+// a closed metal park gate (barred, with a padlock) across the cave mouth
+function drawCaveGate(d) {
+  const x0 = d.x - 2, y0 = d.y - 2, w = d.w + 4, h = d.h + 6;
+  const cx = x0 + w / 2;
   ctx.save();
-  ctx.strokeStyle = '#4a4038';
-  ctx.lineWidth = 9;
-  ctx.lineCap = 'round';
-  // two crossed chains
-  for (const [x1, x2] of [[d.x - 6, d.x + d.w + 6], [d.x + d.w + 6, d.x - 6]]) {
-    ctx.beginPath();
-    ctx.moveTo(x1, d.y);
-    ctx.lineTo(x2, d.y + d.h);
-    ctx.stroke();
+  // posts
+  ctx.fillStyle = '#33333a';
+  ctx.fillRect(x0 - 6, y0, 7, h);
+  ctx.fillRect(x0 + w - 1, y0, 7, h);
+  // vertical bars
+  for (let bx = x0 + 5; bx < x0 + w - 4; bx += 13) {
+    ctx.fillStyle = '#5a5a62'; ctx.fillRect(bx, y0 + 3, 5, h - 8);
+    ctx.fillStyle = '#828290'; ctx.fillRect(bx, y0 + 3, 2, h - 8); // highlight
   }
-  ctx.strokeStyle = '#7a6f60'; // link highlight
-  ctx.lineWidth = 3;
-  for (const [x1, x2] of [[d.x - 6, d.x + d.w + 6], [d.x + d.w + 6, d.x - 6]]) {
-    ctx.beginPath();
-    ctx.moveTo(x1, d.y);
-    ctx.lineTo(x2, d.y + d.h);
-    ctx.stroke();
-  }
-  // padlock in the middle
-  ctx.strokeStyle = '#c9a227';
-  ctx.lineWidth = 6;
-  ctx.beginPath();
-  ctx.arc(cx, cy - 12, 9, Math.PI, 0);
-  ctx.stroke();
-  ctx.fillStyle = '#ffd84d';
-  ctx.fillRect(cx - 14, cy - 6, 28, 22);
-  ctx.fillStyle = '#7a5a10';
-  ctx.fillRect(cx - 3, cy + 1, 6, 10);
+  // horizontal rails (top / middle / bottom)
+  ctx.fillStyle = '#484850';
+  for (const ry of [y0 + 3, y0 + h * 0.5 - 3, y0 + h - 8]) ctx.fillRect(x0, ry, w, 6);
+  ctx.fillStyle = '#6c6c78';
+  for (const ry of [y0 + 3, y0 + h * 0.5 - 3, y0 + h - 8]) ctx.fillRect(x0, ry, w, 2);
+  // center seam where the two gate halves meet
+  ctx.fillStyle = '#2a2a30'; ctx.fillRect(cx - 2, y0 + 2, 4, h - 4);
+  // padlock hanging where they meet
+  const ly = y0 + h * 0.5 + 4;
+  ctx.strokeStyle = '#b8901f'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(cx, ly - 3, 8, Math.PI, 0); ctx.stroke();
+  ctx.fillStyle = '#ffd84d'; ctx.fillRect(cx - 12, ly + 1, 24, 18);
+  ctx.fillStyle = '#c9a227'; ctx.fillRect(cx - 12, ly + 1, 24, 3);
+  ctx.fillStyle = '#7a5a10'; ctx.fillRect(cx - 3, ly + 7, 6, 8);
   ctx.restore();
+}
+
+// the key floats up out of the chest and the hero holds it overhead
+function drawKeyLift() {
+  const kg = game.keyGrab, p = game.player;
+  if (kg.t < 0.3) return;
+  const key = assets.props['key'];
+  const headX = p.x, headY = p.y - HERO_HEIGHT / 2 - 24;
+  const riseK = Math.min(1, (kg.t - 0.3) / 0.6);
+  const e = riseK * (2 - riseK); // ease-out
+  const fromX = kg.kc.x, fromY = kg.kc.y - 34;
+  const kx = fromX + (headX - fromX) * e;
+  const ky = fromY + (headY - fromY) * e - (kg.t > 0.9 ? Math.sin((kg.t - 0.9) * 8) * 3 : 0);
+  const kh = 36, kw = kh * (key.width / key.height);
+  ctx.drawImage(key, kx - kw / 2, ky - kh / 2, kw, kh);
+  if (kg.t > 0.9) { // triumphant sparkles
+    ctx.fillStyle = '#fff';
+    for (let i = 0; i < 3; i++) {
+      const a = kg.t * 4 + i * 2.1;
+      ctx.fillRect(kx + Math.cos(a) * 22 - 1.5, ky + Math.sin(a) * 22 - 1.5, 3, 3);
+    }
+  }
 }
 
 function drawBanner() {

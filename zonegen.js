@@ -353,24 +353,24 @@ export function buildZoneLayout(key, assets) {
 
   if (def.type === 'campsite') {
     river(L, rng, true, W * 0.72, H * 0.5, assets);
-    // the cave used to be here — now it's just a leafy corner of camp
-    addProp(L, P['tree'], W * 0.14, H * 0.24, 118);
-    addProp(L, P['tree-b'], W * 0.24, H * 0.2, 104);
-    addProp(L, P['well'], W * 0.46, H * 0.44, 88, { bw: 0.8, bh: 0.4 });
-    addProp(L, P['pine'], W * 0.35, H * 0.33, 160);
-    // home sweet home: tent (walk in to rest), bonfire, treasure chest
-    const tent = addProp(L, P['tent'], W * 0.28, H * 0.82, 140, { bw: 0.8, bh: 0.3 });
+    // decorations around the edges
+    addProp(L, P['tree'], W * 0.12, H * 0.2, 118);
+    addProp(L, P['tree-b'], W * 0.86, H * 0.22, 104);
+    addProp(L, P['pine'], W * 0.15, H * 0.66, 150);
+    addProp(L, P['well'], W * 0.3, H * 0.22, 88, { bw: 0.8, bh: 0.4 });
+    // home cluster, centered: tent on the left, bonfire in the middle, chest on the right
+    const tent = addProp(L, P['tent'], W * 0.34, H * 0.56, 140, { bw: 0.8, bh: 0.3 });
     L.tentDoor = { x: tent.x + tent.w * 0.34, y: tent.y + tent.h * 0.6, w: tent.w * 0.32, h: tent.h * 0.46 };
     L.colliders.pop(); // the door replaces the tent's solid box; re-add side walls
     L.colliders.push({ x: tent.x, y: tent.y + tent.h * 0.55, w: tent.w * 0.3, h: tent.h * 0.4 });
     L.colliders.push({ x: tent.x + tent.w * 0.7, y: tent.y + tent.h * 0.55, w: tent.w * 0.3, h: tent.h * 0.4 });
-    L.firePit = { x: W * 0.28 + 130, y: H * 0.82 - 10 };
+    L.firePit = { x: W * 0.5, y: H * 0.5 };
     L.colliders.push({ x: L.firePit.x - 22, y: L.firePit.y - 12, w: 44, h: 22 });
-    L.chestSpot = { x: W * 0.42, y: H * 0.76 };
+    L.chestSpot = { x: W * 0.64, y: H * 0.5 };
     const chest = addProp(L, P['chest'], L.chestSpot.x, L.chestSpot.y, 54, { bw: 0.9, bh: 0.3 });
     L.chestZone = { x: chest.x - 24, y: chest.y - 20, w: chest.w + 48, h: chest.h + 44 };
-    addProp(L, P['sign-home'], W * 0.55, H * 0.86, P['sign-home'].height, { solid: false });
-    scatter(L, rng, [P['tree'], P['tree-b']], 3, 80, 110);
+    addProp(L, P['sign-home'], W * 0.5, H * 0.66, P['sign-home'].height, { solid: false });
+    scatter(L, rng, [P['tree'], P['tree-b']], 2, 80, 110);
   } else if (def.type === 'battlefield') {
     caveWithDoor(L, P['cave-stone'], W * 0.21, H * 0.31, 185);
     addProp(L, P['sign-goin'], W * 0.21 + 150, H * 0.31, P['sign-goin'].height, { solid: false });
