@@ -261,8 +261,7 @@ function update(dt) {
         game.paused = false; // tap anywhere to resume
         tap = null;
       } else if (Math.hypot(w.x - bb.x, w.y - bb.y) < bb.r + 12) {
-        if (navigator.vibrate) navigator.vibrate(30); // confirm the tap landed, even on cooldown
-        tryBonk();
+        tryBonk(); // haptic fires on pointerdown (see initHaptics) — inside the real gesture
         tap = null;
       } else if (Math.hypot(w.x - hb.x, w.y - hb.y) < hb.r + 10) {
         if (game.homeArm > 0) {
@@ -1345,9 +1344,41 @@ function pulseText(text, x, y, size, t, color = '#fff') {
   ctx.restore();
 }
 
+// ---------- haptics ----------
+// The bonk button gives a quick tactile buzz. iOS Safari ignores navigator.vibrate,
+// so we also toggle an off-screen <input switch> — iOS 17.4+ turns that into a subtle
+// haptic tap. Both must fire from the real pointerdown gesture: browsers reject a
+// vibration requested outside a user gesture (which is why the old rAF call did nothing).
+let hapticToggle = null;
+function initHaptics() {
+  try {
+    const label = document.createElement('label');
+    label.setAttribute('aria-hidden', 'true');
+    label.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.setAttribute('switch', '');
+    label.appendChild(input);
+    document.body.appendChild(label);
+    hapticToggle = label;
+  } catch { /* no DOM access — haptics just stay off */ }
+}
+function haptic() {
+  if (navigator.vibrate) { try { navigator.vibrate(20); } catch { /* ignore */ } }
+  if (hapticToggle) { try { hapticToggle.click(); } catch { /* ignore */ } }
+}
+
 // ---------- boot ----------
 
 initInput(canvas);
+initHaptics();
+// Fire the buzz the instant the bonk button is pressed — immediate, and inside the gesture.
+canvas.addEventListener('pointerdown', e => {
+  if (state !== 'PLAY' || game.paused) return;
+  const w = toWorld(e.clientX, e.clientY);
+  const bb = bonkBtn();
+  if (Math.hypot(w.x - bb.x, w.y - bb.y) < bb.r + 12) haptic();
+});
 let last = 0;
 function loop(t) {
   const dt = Math.min(0.05, (t - last) / 1000 || 0.016);
