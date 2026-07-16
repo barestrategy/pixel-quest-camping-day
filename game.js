@@ -27,6 +27,8 @@ const FLASHLIGHT_AT = 10;   // total treasures to unlock the flashlight
 const PARTY_AT = 8;         // treasures banked to earn the Party Hat
 const WIZARD_AT = 12;       // total treasures collected to earn the Wizard Hat
 const DAZZLE_TIME = 6;      // seconds the Party Hat's confetti blast dazzles ants
+const ESCAPE_TIME = 45;     // seconds to flee the cave after the Queen falls
+const COLLAPSE_DUR = 2.6;   // cave-collapse animation length before the death screen
 const BUFF_TIME = { speed: 10, invuln: 8 };
 let invSlots = [];  // inventory strip tap targets (flashlight badge + worn/available hats)
 
@@ -160,6 +162,9 @@ function startGame(hero) {
   game.keyGrab = null;       // active open-chest-and-lift-key celebration
   game.escaping = false;     // true after beating the Queen — race to the exit
   game.rumbleT = 0;          // timer between falling-debris particles during the escape
+  game.escapeT = 0;          // countdown: reach the exit before the cave comes down
+  game.escapeWarned = false; // one-time "HURRY!" warning as the timer runs low
+  game.collapse = null;      // { t, dur } while the cave-collapse animation plays
   game.flashlight = false;
   game.inventoryHats = new Set(); // owned, unworn one-shot powers (party/wizard)
   game.wornHat = null;            // which inventory power BONK will fire next
@@ -377,6 +382,7 @@ const entityEvents = {
     game.shake = 0.6;
     // the Crown: King Mode (invincible + fast) powers the escape to the exit
     game.escaping = true;
+    game.escapeT = ESCAPE_TIME; // beat the collapse or get buried with the Queen
     game.hat = 'crown';
     game.buffs.invuln = 999;
     game.buffs.speed = 999;
@@ -428,6 +434,30 @@ function updatePlay(dt) {
       showBanner(game.keys >= TOTAL_KEYS ? 'All keys — open the cave!' : 'Got a key!  ' + game.keys + '/' + TOTAL_KEYS);
     }
     if (kg.t >= 1.7) { kg.kc.collected = true; game.keyGrab = null; }
+    return;
+  }
+
+  // too slow — the cave comes down: violent shake, raining rock, fade to black, then the death screen
+  if (game.collapse) {
+    const c = game.collapse;
+    c.t += dt;
+    p.moving = false;
+    game.shake = Math.max(game.shake, 0.4);
+    for (let i = 0; i < 4; i++) { // rock rains harder than the escape rumble ever did
+      game.particles.push({
+        x: Math.random() * W, y: -20 - Math.random() * 60,
+        vx: (Math.random() - 0.5) * 60, vy: 300 + Math.random() * 260, life: 1.4,
+        color: ['#5d5548', '#3a352e', '#241b12', '#6e6355'][Math.floor(Math.random() * 4)],
+      });
+    }
+    // the world is frozen (we return early), so keep the debris falling ourselves
+    for (const pt of game.particles) {
+      pt.x += pt.vx * dt; pt.y += pt.vy * dt;
+      pt.vy += 300 * dt;
+      pt.life -= dt;
+    }
+    game.particles = game.particles.filter(pt => pt.life > 0);
+    if (c.t >= c.dur) endGame(false);
     return;
   }
 
@@ -498,6 +528,17 @@ function updatePlay(dt) {
 
   // the cave is coming down around you — sustained tremor + falling debris
   if (game.escaping) {
+    game.escapeT -= dt;
+    if (!game.escapeWarned && game.escapeT <= 12) {
+      game.escapeWarned = true;
+      showBanner('The cave is collapsing — HURRY!');
+      sfx.buzz();
+    }
+    if (game.escapeT <= 0) {
+      game.collapse = { t: 0, dur: COLLAPSE_DUR };
+      sfx.rumble();
+      return;
+    }
     game.shake = Math.max(game.shake, 0.15);
     game.rumbleT -= dt;
     if (game.rumbleT <= 0) {
@@ -724,6 +765,13 @@ function drawPlay(t) {
       const pulse = 0.5 + Math.sin(t * 0.012) * 0.5;
       ctx.fillStyle = 'rgba(160,20,10,' + (0.1 + pulse * 0.12) + ')';
       ctx.fillRect(-20, -20, W + 40, H + 40);
+    }
+    if (game.collapse) { // rubble dust swallows the screen as everything caves in
+      const c = game.collapse;
+      const k = Math.min(1, c.t / (c.dur * 0.8));
+      ctx.fillStyle = 'rgba(20,14,8,' + (k * k).toFixed(3) + ')';
+      ctx.fillRect(-20, -20, W + 40, H + 40);
+      if (c.t > 0.2) drawCenterText('THE CAVE COLLAPSED!', W / 2, H / 2, 52, '#e8302a');
     }
     if (game.sleep) drawSleep(layout);
   }
@@ -1086,6 +1134,16 @@ function drawQuest() {
   ctx.fillRect(W / 2 - w / 2, y - 15, w, 24);
   ctx.fillStyle = '#ffe9a8';
   ctx.fillText(text, W / 2, y + 3);
+  // big escape countdown under the quest line — goes red and pulses when time is short
+  if (game.escaping && !game.collapse && game.escapeT > 0) {
+    const s = Math.ceil(game.escapeT);
+    const low = game.escapeT <= 12;
+    ctx.save();
+    if (low) ctx.globalAlpha = 0.6 + Math.abs(Math.sin(game.escapeT * 6)) * 0.4;
+    // sits below the banner line (y≈152) so "HURRY!" and zone names never overlap it
+    drawCenterText('0:' + String(s).padStart(2, '0'), W / 2, y + 105, 42, low ? '#ff5a4d' : '#ffe14d');
+    ctx.restore();
+  }
 }
 
 // Menu art has flat backgrounds: extend the color edge-to-edge, contain-fit the art.

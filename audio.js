@@ -204,4 +204,9 @@ export const sfx = {
     const t0 = ctx.currentTime;
     for (let i = 0; i < 4; i++) blip(500 + Math.random() * 700, 0.03, t0 + i * 0.045, 'square', 0.045, 300);
   },
+  rumble() {
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    for (let i = 0; i < 6; i++) blip(70 + Math.random() * 50, 0.4, t0 + i * 0.3, 'sawtooth', 0.2, 30);
+  },
 };
