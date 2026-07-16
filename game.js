@@ -15,6 +15,7 @@ function getLayout(key) {
 const muteBtn = () => ({ x: W - 64 - view.safe.r, y: H - 64 - view.safe.b, r: 30 });
 const bonkBtn = () => ({ x: W - 130 - view.safe.r, y: H - 250 - view.safe.b, r: 96 });
 const homeBtn = () => ({ x: 64 + view.safe.l, y: H - 64 - view.safe.b, r: 30 });
+const pauseBtn = () => ({ x: 152 + view.safe.l, y: H - 64 - view.safe.b, r: 30 });
 const startBtnRect = () => ({ x: W / 2 - 150, y: H - 165, w: 300, h: 105 });
 
 // hats are badges earned during the run — everything resets when it ends
@@ -27,7 +28,7 @@ const FLASHLIGHT_AT = 10;   // total treasures to unlock the flashlight
 const PARTY_AT = 8;         // treasures banked to earn the Party Hat
 const WIZARD_AT = 12;       // total treasures collected to earn the Wizard Hat
 const DAZZLE_TIME = 6;      // seconds the Party Hat's confetti blast dazzles ants
-const ESCAPE_TIME = 45;     // seconds to flee the cave after the Queen falls
+const ESCAPE_TIME = 15;     // seconds to flee the cave after the Queen falls
 const COLLAPSE_DUR = 2.6;   // cave-collapse animation length before the death screen
 const BUFF_TIME = { speed: 10, invuln: 8 };
 let invSlots = [];  // inventory strip tap targets (flashlight badge + worn/available hats)
@@ -108,6 +109,7 @@ const game = {
   visited: new Set(['1,1']),
   caveVisited: new Set(), // fog-of-war: dungeon rooms seen this run
   skitterT: 2,
+  paused: false,
 };
 
 window.pq = game; // debug/testing handle
@@ -180,6 +182,7 @@ function startGame(hero) {
   game.caveRoom = { ...CAVE_ENTRANCE };
   game.caveVisited = new Set();
   game.skitterT = 2;
+  game.paused = false;
   game.player.x = W / 2;
   game.player.y = H / 2 + 60;
   game.player.dir = 'down';
@@ -248,9 +251,16 @@ function update(dt) {
   } else if (state === 'PLAY') {
     if (tap) {
       const w = toWorld(tap.x, tap.y);
+      const pz = pauseBtn();
       const bb = bonkBtn();
       const hb = homeBtn();
-      if (Math.hypot(w.x - bb.x, w.y - bb.y) < bb.r + 12) {
+      if (Math.hypot(w.x - pz.x, w.y - pz.y) < pz.r + 12) {
+        game.paused = !game.paused;
+        tap = null;
+      } else if (game.paused) {
+        game.paused = false; // tap anywhere to resume
+        tap = null;
+      } else if (Math.hypot(w.x - bb.x, w.y - bb.y) < bb.r + 12) {
         if (navigator.vibrate) navigator.vibrate(30); // confirm the tap landed, even on cooldown
         tryBonk();
         tap = null;
@@ -272,8 +282,10 @@ function update(dt) {
         }
       }
     }
-    if (input.bonkPressed) tryBonk();
-    updatePlay(dt);
+    if (!game.paused) {
+      if (input.bonkPressed) tryBonk();
+      updatePlay(dt);
+    }
   } else if (state === 'WIN' || state === 'DIED') {
     if (tap && stateTime > 0.8) setState('TITLE');
   }
@@ -529,7 +541,7 @@ function updatePlay(dt) {
   // the cave is coming down around you — sustained tremor + falling debris
   if (game.escaping) {
     game.escapeT -= dt;
-    if (!game.escapeWarned && game.escapeT <= 12) {
+    if (!game.escapeWarned && game.escapeT <= 6) {
       game.escapeWarned = true;
       showBanner('The cave is collapsing — HURRY!');
       sfx.buzz();
@@ -679,7 +691,7 @@ function draw(t) {
     drawMenuScreen('screen-title');
     drawTitleDecor(t);
     pulseText('TAP TO START', W / 2, H * 0.72, 40, t);
-    drawCenterText('A game by the Pixel Quest kids', W / 2, H - 30, 20, 'rgba(255,255,255,0.75)');
+    drawCenterText('Created by: Ashton and Kenzie', W / 2, H - 30, 20, 'rgba(255,255,255,0.75)');
   } else if (state === 'SELECT') {
     drawSelect(t);
   } else if (state === 'PLAY') {
@@ -777,6 +789,12 @@ function drawPlay(t) {
   }
   drawHud();
   drawBanner();
+  if (game.paused) { // freeze frame with a dim overlay so nothing sneaks up on you
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    drawCenterText('PAUSED', W / 2, H / 2 - 10, 56, '#ffe9a8');
+    pulseText('TAP TO RESUME', W / 2, H / 2 + 44, 30, t);
+  }
   if (game.fade) {
     const f = game.fade;
     const a = 1 - Math.abs(1 - 2 * (f.t / f.dur)); // 0 -> 1 -> 0
@@ -1084,6 +1102,22 @@ function drawHud() {
   ctx.fillStyle = game.homeArm > 0 ? 'rgba(160,40,30,0.9)' : 'rgba(0,0,0,0.6)';
   ctx.fillRect(hb.x - 3, hb.y + 4, 6, 9); // door
   ctx.restore();
+  // pause button — pause bars while playing, a play triangle while paused
+  const pz = pauseBtn();
+  ctx.save();
+  ctx.globalAlpha = 0.7;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.beginPath(); ctx.arc(pz.x, pz.y, pz.r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  if (game.paused) {
+    ctx.beginPath(); // play triangle
+    ctx.moveTo(pz.x - 7, pz.y - 11); ctx.lineTo(pz.x + 12, pz.y); ctx.lineTo(pz.x - 7, pz.y + 11);
+    ctx.closePath(); ctx.fill();
+  } else {
+    ctx.fillRect(pz.x - 9, pz.y - 11, 6, 22); // pause bars
+    ctx.fillRect(pz.x + 3, pz.y - 11, 6, 22);
+  }
+  ctx.restore();
   // score with coin icon
   const coin = assets.sprites['coin'];
   const ch = 34, cw = ch * (coin.width / coin.height);
@@ -1137,7 +1171,7 @@ function drawQuest() {
   // big escape countdown under the quest line — goes red and pulses when time is short
   if (game.escaping && !game.collapse && game.escapeT > 0) {
     const s = Math.ceil(game.escapeT);
-    const low = game.escapeT <= 12;
+    const low = game.escapeT <= 6;
     ctx.save();
     if (low) ctx.globalAlpha = 0.6 + Math.abs(Math.sin(game.escapeT * 6)) * 0.4;
     // sits below the banner line (y≈152) so "HURRY!" and zone names never overlap it
