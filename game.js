@@ -2,7 +2,7 @@
 import { W, H, setWorldWidth, loadAssets } from './assets.js';
 import { input, initInput, getMove, takeTap, clearFrameFlags, drawJoystick } from './input.js';
 import { initItems, enterZone, updateEntities, drawEntities, bonkAttack, zapAllAnts, TOTAL_KEYS } from './entities.js';
-import { ZONE_DEFS, buildZoneLayout, snapshotLayout, moveWithCollision, blockedAt, randomOpenSpot, findOpenNear } from './zonegen.js';
+import { ZONE_DEFS, CAVE_ENTRANCE, CAVE_ROOMS, buildZoneLayout, snapshotLayout, moveWithCollision, blockedAt, randomOpenSpot, findOpenNear } from './zonegen.js';
 import { unlock, setTheme, sfx, toggleMute, isMuted } from './audio.js';
 
 let layouts = {}; // zone key -> generated layout, rebuilt when the world resizes
@@ -91,6 +91,7 @@ const game = {
   caveFinds: 0,           // tunnel treasures found this run (3 earns the wizard hat)
   hearts: 6,              // half-heart units; 6 = three full hearts
   zone: { x: 1, y: 1 },
+  caveRoom: { ...CAVE_ENTRANCE }, // current dungeon room while inCave
   player: { x: W / 2, y: H / 2 + 60, dir: 'down', moving: false, hurtT: 0 },
   best: Number(localStorage.getItem('pq-best') || 0),
   select: { chosen: null },
@@ -103,6 +104,8 @@ const game = {
   banner: { text: '', t: 0 },
   transition: null,       // { dx, dy, t } while sliding between zones
   visited: new Set(['1,1']),
+  caveVisited: new Set(), // fog-of-war: dungeon rooms seen this run
+  skitterT: 2,
 };
 
 window.pq = game; // debug/testing handle
@@ -113,7 +116,11 @@ window.pqDebug = () => ({ state, view: { ...view }, joy: { ...input.joy }, taps:
 const TRANSITION_TIME = 0.45;
 const EDGE = 8;           // how close to the edge triggers a zone change
 
-function zoneKey() { return game.inCave ? 'U' : game.zone.x + ',' + game.zone.y; }
+function currentCoord() { return game.inCave ? game.caveRoom : game.zone; }
+function zoneKey() {
+  const c = currentCoord();
+  return game.inCave ? 'U:' + c.x + ',' + c.y : c.x + ',' + c.y;
+}
 
 // fade-to-black used for cave entrances/exits; action fires at the midpoint
 function startFade(action) {
@@ -164,6 +171,9 @@ function startGame(hero) {
   game.queenDown = false;
   game.hearts = 6;
   game.zone = { x: 1, y: 1 };
+  game.caveRoom = { ...CAVE_ENTRANCE };
+  game.caveVisited = new Set();
+  game.skitterT = 2;
   game.player.x = W / 2;
   game.player.y = H / 2 + 60;
   game.player.dir = 'down';
@@ -354,6 +364,7 @@ const entityEvents = {
   },
   onChestOpen: () => sfx.creak(),
   onQueenRoar: () => sfx.buzz(),
+  onSkitter: () => sfx.skitter(),
   onQueenHit: () => {
     sfx.bossHit();
     game.shake = 0.35;
@@ -424,8 +435,9 @@ function updatePlay(dt) {
     const tr = game.transition;
     tr.t += dt;
     if (tr.t >= TRANSITION_TIME) {
-      game.zone.x += tr.dx;
-      game.zone.y += tr.dy;
+      const c = currentCoord();
+      c.x += tr.dx;
+      c.y += tr.dy;
       game.transition = null;
       // enter from the opposite edge
       if (tr.dx === 1) p.x = PLAYER_RADIUS + EDGE;
@@ -528,11 +540,11 @@ function updatePlay(dt) {
       p.y = d.y + d.h + 26;
       return;
     }
-    // unlocked → descend
-    const from = zoneKey();
+    // unlocked → descend, always landing at the Cave Mouth (the dungeon entrance)
     return startFade(() => {
       game.inCave = true;
-      const exit = getLayout('U').exits.find(e => e.to === from) || getLayout('U').exits[0];
+      game.caveRoom = { ...CAVE_ENTRANCE };
+      const exit = getLayout(zoneKey()).exits[0];
       p.x = exit.rect.x + exit.rect.w / 2;
       p.y = exit.rect.y + exit.rect.h + 30;
       onZoneEnter();
@@ -555,12 +567,17 @@ function updatePlay(dt) {
     }
   }
 
-  // walk off an edge -> slide to the neighboring zone (if there is one)
+  // walk off an edge -> slide to the neighboring zone/room (if the map connects there)
   if (!game.inCave) {
     if (p.x < PLAYER_RADIUS && game.zone.x > 0) return startTransition(-1, 0);
     if (p.x > W - PLAYER_RADIUS && game.zone.x < 2) return startTransition(1, 0);
     if (p.y < PLAYER_RADIUS && game.zone.y > 0) return startTransition(0, -1);
     if (p.y > H - PLAYER_RADIUS && game.zone.y < 2) return startTransition(0, 1);
+  } else {
+    if (p.x < PLAYER_RADIUS && layout.gaps.w) return startTransition(-1, 0);
+    if (p.x > W - PLAYER_RADIUS && layout.gaps.e) return startTransition(1, 0);
+    if (p.y < PLAYER_RADIUS && layout.gaps.n) return startTransition(0, -1);
+    if (p.y > H - PLAYER_RADIUS && layout.gaps.s) return startTransition(0, 1);
   }
   p.x = Math.max(PLAYER_RADIUS, Math.min(W - PLAYER_RADIUS, p.x));
   p.y = Math.max(PLAYER_RADIUS, Math.min(H - PLAYER_RADIUS, p.y));
@@ -572,7 +589,7 @@ function rectHas(r, x, y) {
 
 function onZoneEnter() {
   const key = zoneKey();
-  game.visited.add(key);
+  if (game.inCave) game.caveVisited.add(key); else game.visited.add(key);
   const layout = getLayout(key);
   // never arrive stuck inside water or a wall
   const pos = findOpenNear(layout, game.player.x, game.player.y);
@@ -580,7 +597,7 @@ function onZoneEnter() {
   game.player.y = pos.y;
   showBanner(layout.name);
   enterZone(game, layout);
-  setTheme(key === 'U' ? 'cave' : key === '1,1' ? 'camp' : 'adventure');
+  setTheme(game.inCave ? 'cave' : key === '1,1' ? 'camp' : 'adventure');
 }
 
 // ---------- draw ----------
@@ -648,9 +665,11 @@ function drawPlay(t) {
     const tr = game.transition;
     const k = Math.min(1, tr.t / TRANSITION_TIME);
     const e = k * k * (3 - 2 * k); // smoothstep
-    const nx = game.zone.x + tr.dx, ny = game.zone.y + tr.dy;
+    const c = currentCoord();
+    const nx = c.x + tr.dx, ny = c.y + tr.dy;
+    const nextKey = game.inCave ? 'U:' + nx + ',' + ny : nx + ',' + ny;
     ctx.drawImage(snapshotLayout(getLayout(zoneKey())), -tr.dx * e * W, -tr.dy * e * H);
-    ctx.drawImage(snapshotLayout(getLayout(nx + ',' + ny)), tr.dx * W - tr.dx * e * W, tr.dy * H - tr.dy * e * H);
+    ctx.drawImage(snapshotLayout(getLayout(nextKey)), tr.dx * W - tr.dx * e * W, tr.dy * H - tr.dy * e * H);
   } else {
     if (game.shake > 0) {
       ctx.translate((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 14);
@@ -776,18 +795,28 @@ function drawMinimap() {
   const x0 = W / 2 - mw / 2, y0 = 12 + view.safe.t;
   ctx.fillStyle = 'rgba(0,0,0,0.4)';
   ctx.fillRect(x0, y0, mw, mw);
-  for (let zy = 0; zy < 3; zy++) {
-    for (let zx = 0; zx < 3; zx++) {
-      const key = zx + ',' + zy;
-      const cur = !game.inCave && zx === game.zone.x && zy === game.zone.y;
-      ctx.fillStyle = cur ? '#ffe14d' : game.visited.has(key) ? 'rgba(180,230,140,0.9)' : 'rgba(255,255,255,0.25)';
+  if (game.inCave) {
+    // fog of war: a room only appears once you've actually been there
+    for (const coord of Object.keys(CAVE_ROOMS)) {
+      const [zx, zy] = coord.split(',').map(Number);
+      const key = 'U:' + coord;
+      const cur = zx === game.caveRoom.x && zy === game.caveRoom.y;
+      if (!cur && !game.caveVisited.has(key)) continue;
+      ctx.fillStyle = cur ? '#ffe14d' : 'rgba(120,220,255,0.85)';
       ctx.fillRect(x0 + pad + zx * (cell + gap), y0 + pad + zy * (cell + gap), cell, cell);
     }
-  }
-  if (game.inCave) {
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.fillRect(x0, y0 + mw + 4, mw, 22);
     drawCenterText('CAVE', x0 + mw / 2, y0 + mw + 21, 16, '#8adfff');
+  } else {
+    for (let zy = 0; zy < 3; zy++) {
+      for (let zx = 0; zx < 3; zx++) {
+        const key = zx + ',' + zy;
+        const cur = zx === game.zone.x && zy === game.zone.y;
+        ctx.fillStyle = cur ? '#ffe14d' : game.visited.has(key) ? 'rgba(180,230,140,0.9)' : 'rgba(255,255,255,0.25)';
+        ctx.fillRect(x0 + pad + zx * (cell + gap), y0 + pad + zy * (cell + gap), cell, cell);
+      }
+    }
   }
 }
 

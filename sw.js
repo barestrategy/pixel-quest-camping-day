@@ -1,5 +1,5 @@
 // Cache-first service worker — the whole game works offline after first load.
-const CACHE = 'pixel-quest-v10';
+const CACHE = 'pixel-quest-v11';
 const ASSETS = [
   '.', 'index.html', 'game.js', 'assets.js', 'input.js', 'entities.js', 'audio.js', 'zonegen.js',
   'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',

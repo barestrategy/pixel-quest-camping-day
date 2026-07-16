@@ -11,8 +11,9 @@ const ANT_CHASE_SPEED = 175;  // still under the player's 220 so escape stays po
 const QUEEN_CHASE_SPEED = 215;
 const ANT_AGGRO = 260;
 const QUEEN_AGGRO = 320;
-const QUEEN_ZONE = '1,0';
 const SAFE_ZONE = '1,1';
+const CAVE_ENTRANCE_KEY = 'U:0,2'; // safe landing room — no ants, gets you oriented
+const CAVE_QUEEN_KEY = 'U:2,0';    // the dungeon's final room
 
 export const OUTER_ZONES = ['0,0', '1,0', '2,0', '0,1', '2,1', '0,2', '1,2', '2,2'];
 
@@ -21,11 +22,14 @@ export const OUTER_ZONES = ['0,0', '1,0', '2,0', '0,1', '2,1', '0,2', '1,2', '2,
 export const KEY_ZONES = ['0,0', '2,0', '0,1', '2,1', '0,2', '1,2', '2,2'];
 export const TOTAL_KEYS = KEY_ZONES.length;
 
-// deterministic ant count per zone (~+1 vs v2; queen zone gets the queen too)
-const ANT_COUNTS = { '0,0': 3, '1,0': 2, '2,0': 4, '0,1': 2, '2,1': 3, '0,2': 4, '1,2': 3, '2,2': 4, 'U': 2 };
+// deterministic ant count per zone (~+1 vs v2; the Queen's room gets minions too)
+const ANT_COUNTS = {
+  '0,0': 3, '1,0': 2, '2,0': 4, '0,1': 2, '2,1': 3, '0,2': 4, '1,2': 3, '2,2': 4,
+  'U:0,1': 2, 'U:0,0': 1, 'U:1,1': 3, 'U:2,1': 2, 'U:2,0': 2,
+};
 
 const rand = (a, b) => a + Math.random() * (b - a);
-const keyOf = g => g.inCave ? 'U' : g.zone.x + ',' + g.zone.y;
+const keyOf = g => g.inCave ? 'U:' + g.caveRoom.x + ',' + g.caveRoom.y : g.zone.x + ',' + g.zone.y;
 const rectHas = (r, x, y) => x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h;
 
 // Current collectible type from the score, exactly like the Scratch tiers.
@@ -38,8 +42,8 @@ export function itemType(score) {
 export function initItems(game) {
   // positions are assigned lazily, on first entry into each zone
   game.items = OUTER_ZONES.map(z => ({ zone: z, x: 0, y: 0, placed: false }));
-  // tunnel treasure: three collectible crystals glinting in the dark
-  for (let i = 0; i < 3; i++) game.items.push({ zone: 'U', x: 0, y: 0, placed: false });
+  // dungeon treasure: crystals glinting in three of the cave rooms
+  for (const z of ['U:0,1', 'U:1,1', 'U:0,0']) game.items.push({ zone: z, x: 0, y: 0, placed: false });
   game.drops = [];
   game.keyChests = [];   // key-chests spawned by clearing a zone; persist until grabbed
   game.particles = [];
@@ -61,14 +65,15 @@ export function enterZone(game, layout) {
       item.x = pos.x; item.y = pos.y; item.placed = true;
     }
   }
-  if (key === SAFE_ZONE) return; // only the campsite is safe; every other zone stays alive
+  // the campsite and the cave mouth are safe landings — every other zone stays alive
+  if (key === SAFE_ZONE || key === CAVE_ENTRANCE_KEY) return;
   const n = ANT_COUNTS[key] || 2;
   for (let i = 0; i < n; i++) {
     const pos = randomOpenSpot(layout, 60, p, 280);
     game.ants.push({ x: pos.x, y: pos.y, heading: rand(0, Math.PI * 2), turnT: rand(0.6, 2), queen: false });
   }
-  // the Queen waits in the cave — beat her to trigger the escape
-  if (key === 'U' && !game.queenDown) {
+  // the Queen waits in the dungeon's final room — beat her to trigger the escape
+  if (key === CAVE_QUEEN_KEY && !game.queenDown) {
     const pos = randomOpenSpot(layout, 90, p, 360);
     game.ants.push({ x: pos.x, y: pos.y, heading: rand(0, Math.PI * 2), turnT: 1, queen: true, hp: 5, state: 'wander', stateT: 0 });
   }
@@ -170,7 +175,7 @@ export function updateEntities(game, dt, events, layout) {
         game.floats.push({ x: item.x, y: item.y - 20, text: "S'MORE POWER!", life: 1.2 });
       } else {
         game.carried++;
-        events.onPickup(key === 'U');
+        events.onPickup(key.startsWith('U:'));
         burst(game, item.x, item.y, '#ffd94d', 12);
         game.floats.push({ x: item.x, y: item.y - 20, text: '+1', life: 0.9 });
       }
@@ -223,6 +228,15 @@ export function updateEntities(game, dt, events, layout) {
     }
   }
   game.keyChests = game.keyChests.filter(kc => !kc.collected);
+
+  // eerie ambience: an unseen skitter cue when ants lurk nearby in the dark
+  if (game.inCave && !game.flashlight) {
+    game.skitterT -= dt;
+    if (game.skitterT <= 0) {
+      game.skitterT = rand(3, 6);
+      if (game.ants.some(a => !a.gone && !a.bonked)) events.onSkitter();
+    }
+  }
 
   // tent: step inside to sleep (game.js runs the night-time sequence)
   if (layout.tentDoor && rectHas(layout.tentDoor, p.x, p.y)) {

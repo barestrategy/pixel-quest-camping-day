@@ -258,12 +258,26 @@ export function findOpenNear(layout, x, y) {
   return { x: W / 2, y: H / 2 };
 }
 
-// ---- underground tunnel (linked by the two caves) ----
+// ---- underground dungeon: a hand-authored room graph, not a dense grid ----
+// You land in the Cave Mouth (bottom-left) and must explore to reveal the rest.
+// Only the Cave Mouth links back to the surface (The Old Cave door, zone '1,0').
+export const CAVE_ENTRANCE = { x: 0, y: 2 };
+export const CAVE_QUEEN = { x: 2, y: 0 };
+export const CAVE_ROOMS = {
+  '0,2': { name: 'Cave Mouth', gaps: { n: true }, entrance: true },
+  '0,1': { name: 'Damp Passage', gaps: { n: true, s: true, e: true } },
+  '0,0': { name: "Miner's Nook", gaps: { s: true }, deadEnd: true },
+  '1,1': { name: 'Bat Hollow', gaps: { w: true, e: true } },
+  '2,1': { name: 'Crystal Bend', gaps: { w: true, n: true } },
+  '2,0': { name: "The Queen's Lair", gaps: { s: true }, queen: true },
+};
 
-function buildCaveLayout(assets) {
-  const rng = mulberry32(hashKey('U:' + W));
+function buildCaveRoomLayout(fullKey, assets) {
+  const [cx, cy] = fullKey.slice(2).split(',').map(Number);
+  const def = CAVE_ROOMS[cx + ',' + cy];
+  const rng = mulberry32(hashKey(fullKey + ':' + W));
   const L = {
-    name: 'The Old Tunnel', type: 'cave', gaps: {},
+    name: def.name, type: 'cave', gaps: def.gaps,
     props: [], colliders: [], waters: [], bridges: [],
     caveDoor: null, tentDoor: null, chestSpot: null, firePit: null,
     exits: [], _snap: null,
@@ -279,7 +293,7 @@ function buildCaveLayout(assets) {
     ctx.fillStyle = ['#3a352e', '#2c2822', '#403a32', '#37322b'][Math.floor(rng() * 4)];
     ctx.fillRect(Math.floor(rng() * W / 8) * 8, Math.floor(rng() * H / 8) * 8, 8, 8);
   }
-  // rocky walls: dark blobs ringing the room
+  // rocky walls: dark blobs ringing the room, skipping a gap where a doorway opens
   const wall = (x, y, r) => {
     ctx.fillStyle = '#1c1916';
     ctx.beginPath(); ctx.arc(x, y + 6, r, 0, Math.PI * 2); ctx.fill();
@@ -288,34 +302,53 @@ function buildCaveLayout(assets) {
     ctx.fillStyle = '#5d5548';
     ctx.beginPath(); ctx.arc(x - r * 0.25, y - r * 0.3, r * 0.5, 0, Math.PI * 2); ctx.fill();
   };
-  for (let x = 0; x < W + 40; x += 46) { wall(x + rng() * 20, 30 + rng() * 26, 34 + rng() * 16); wall(x + rng() * 20, H - 36 - rng() * 20, 34 + rng() * 16); }
-  for (let y = 60; y < H - 40; y += 48) { wall(26 + rng() * 22, y, 34 + rng() * 14); wall(W - 30 - rng() * 22, y, 34 + rng() * 14); }
-  borderWalls(L, {});
-  // soft light pools — ambience only; the real treasure spawns as pickups
-  for (let i = 0; i < 4; i++) {
+  const gs = (W - GAP) / 2 - 20, ge = (W + GAP) / 2 + 20;
+  const vs = (H - GAP) / 2 - 20, ve = (H + GAP) / 2 + 20;
+  for (let x = 0; x < W + 40; x += 46) {
+    if (!(def.gaps.n && x > gs && x < ge)) wall(x + rng() * 20, 30 + rng() * 26, 34 + rng() * 16);
+    if (!(def.gaps.s && x > gs && x < ge)) wall(x + rng() * 20, H - 36 - rng() * 20, 34 + rng() * 16);
+  }
+  for (let y = 60; y < H - 40; y += 48) {
+    if (!(def.gaps.w && y > vs && y < ve)) wall(26 + rng() * 22, y, 34 + rng() * 14);
+    if (!(def.gaps.e && y > vs && y < ve)) wall(W - 30 - rng() * 22, y, 34 + rng() * 14);
+  }
+  borderWalls(L, def.gaps);
+  // soft ambient light pools — violet-tinged in the Queen's lair
+  const poolColor = def.queen ? 'rgba(200,90,220,0.22)' : 'rgba(120,220,255,0.22)';
+  for (let i = 0; i < (def.queen ? 3 : 4); i++) {
     const x1 = 160 + rng() * (W - 320), y1 = 160 + rng() * (H - 320);
     const g = ctx.createRadialGradient(x1, y1, 4, x1, y1, 60);
-    g.addColorStop(0, 'rgba(120,220,255,0.22)');
-    g.addColorStop(1, 'rgba(120,220,255,0)');
+    g.addColorStop(0, poolColor);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = g;
     ctx.fillRect(x1 - 60, y1 - 60, 120, 120);
   }
-  // two lit exits: west ladder -> campsite cave, east ladder -> battlefield cave
-  const ladder = (x, y) => {
-    const g = ctx.createRadialGradient(x, y, 6, x, y, 80);
-    g.addColorStop(0, 'rgba(255,240,180,0.5)');
+  if (def.entrance) { // a shaft of daylight and a ladder up — the only way back out
+    const lx = W * 0.5, ly = H * 0.72;
+    const g = ctx.createRadialGradient(lx, ly, 6, lx, ly, 90);
+    g.addColorStop(0, 'rgba(255,240,180,0.55)');
     g.addColorStop(1, 'rgba(255,240,180,0)');
     ctx.fillStyle = g;
-    ctx.fillRect(x - 80, y - 80, 160, 160);
+    ctx.fillRect(lx - 90, ly - 90, 180, 180);
     ctx.fillStyle = '#7a5a30';
-    ctx.fillRect(x - 22, y - 46, 8, 92); ctx.fillRect(x + 14, y - 46, 8, 92);
-    for (let r = -38; r <= 38; r += 14) ctx.fillRect(x - 22, y + r, 44, 6);
-  };
-  const ex1 = { x: W * 0.14, y: H * 0.5 }, ex2 = { x: W * 0.86, y: H * 0.5 };
-  ladder(ex1.x, ex1.y); ladder(ex2.x, ex2.y);
-  // both ladders now lead back up to The Old Cave (the campsite cave is gone)
-  L.exits.push({ rect: { x: ex1.x - 40, y: ex1.y - 50, w: 80, h: 100 }, to: '1,0' });
-  L.exits.push({ rect: { x: ex2.x - 40, y: ex2.y - 50, w: 80, h: 100 }, to: '1,0' });
+    ctx.fillRect(lx - 22, ly - 46, 8, 92); ctx.fillRect(lx + 14, ly - 46, 8, 92);
+    for (let r = -38; r <= 38; r += 14) ctx.fillRect(lx - 22, ly + r, 44, 6);
+    L.exits.push({ rect: { x: lx - 40, y: ly - 50, w: 80, h: 100 }, to: '1,0' });
+  }
+  if (def.deadEnd) { // a few glinting crystals reward the detour off the main path
+    for (let i = 0; i < 3; i++) {
+      const x1 = W * 0.3 + rng() * W * 0.4, y1 = H * 0.3 + rng() * H * 0.4;
+      ctx.fillStyle = '#6ee7ff';
+      ctx.fillRect(x1, y1, 6, 14); ctx.fillRect(x1 - 4, y1 + 4, 14, 6);
+    }
+  }
+  if (def.queen) { // bone-white scatter marking the boss lair
+    for (let i = 0; i < 6; i++) {
+      const x1 = 100 + rng() * (W - 200), y1 = 100 + rng() * (H - 200);
+      ctx.fillStyle = '#d8d0c0';
+      ctx.fillRect(x1, y1, 18, 5);
+    }
+  }
   L.ground = c;
   return L;
 }
@@ -323,7 +356,7 @@ function buildCaveLayout(assets) {
 // ---- zone recipes ----
 
 export function buildZoneLayout(key, assets) {
-  if (key === 'U') return buildCaveLayout(assets);
+  if (key.startsWith('U:')) return buildCaveRoomLayout(key, assets);
   const def = ZONE_DEFS[key];
   const rng = mulberry32(hashKey(key + ':' + W));
   const [zx, zy] = key.split(',').map(Number);

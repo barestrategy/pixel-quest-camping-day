@@ -199,4 +199,9 @@ export const sfx = {
     blip(1400, 0.05, t0, 'sawtooth', 0.14, 2600);
     blip(180, 0.16, t0 + 0.02, 'square', 0.16, 40);
   },
+  skitter() {
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    for (let i = 0; i < 4; i++) blip(500 + Math.random() * 700, 0.03, t0 + i * 0.045, 'square', 0.045, 300);
+  },
 };
