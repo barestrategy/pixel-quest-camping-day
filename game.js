@@ -668,16 +668,26 @@ function drawKeyLift() {
   const fromX = kg.kc.x, fromY = kg.kc.y - 34;
   const kx = fromX + (headX - fromX) * e;
   const ky = fromY + (headY - fromY) * e - (kg.t > 0.9 ? Math.sin((kg.t - 0.9) * 8) * 3 : 0);
-  // raised arms reaching up toward the key once it's near the head
+  // blocky pixel arms raise straight up overhead (sized to the hero, not stretched toward the key)
   if (kg.t > 0.55) {
-    const sh = p.y - HERO_HEIGHT * 0.18; // shoulder height
-    ctx.strokeStyle = '#e8b98a';
-    ctx.lineWidth = 6;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(p.x - 12, sh); ctx.lineTo(kx - 6, ky + 6);
-    ctx.moveTo(p.x + 12, sh); ctx.lineTo(kx + 6, ky + 6);
-    ctx.stroke();
+    const dirKey = game.hero + '-' + p.dir;
+    const spr = assets.sprites[dirKey];
+    const h = HERO_HEIGHT;
+    const bodyW = h * (spr.width / spr.height);
+    const armK = Math.min(1, (kg.t - 0.55) / 0.2);
+    const ease = armK * (2 - armK);
+    const armW = Math.max(4, Math.round(bodyW * 0.16));
+    const shoulderY = p.y - h * 0.05;
+    const raisedY = p.y - h / 2 - armW;
+    const armTopY = Math.round(shoulderY + (raisedY - shoulderY) * ease);
+    const leftX = Math.round(p.x - bodyW * 0.30 - armW / 2);
+    const rightX = Math.round(p.x + bodyW * 0.30 - armW / 2);
+    ctx.fillStyle = '#e8b98a';
+    ctx.fillRect(leftX, armTopY, armW, Math.max(armW, Math.round(shoulderY - armTopY)));
+    ctx.fillRect(rightX, armTopY, armW, Math.max(armW, Math.round(shoulderY - armTopY)));
+    const handInset = Math.round(bodyW * 0.12 * ease);
+    ctx.fillRect(leftX + handInset, armTopY - Math.round(armW * 0.6), Math.round(armW * 1.3), Math.round(armW * 1.1));
+    ctx.fillRect(rightX - handInset - Math.round(armW * 0.3), armTopY - Math.round(armW * 0.6), Math.round(armW * 1.3), Math.round(armW * 1.1));
   }
   const kh = 36, kw = kh * (key.width / key.height);
   ctx.drawImage(key, kx - kw / 2, ky - kh / 2, kw, kh);
