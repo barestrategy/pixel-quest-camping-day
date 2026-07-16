@@ -401,10 +401,11 @@ export function buildZoneLayout(key, assets) {
     L.colliders.push({ x: tent.x + tent.w * 0.7, y: tent.y + tent.h * 0.55, w: tent.w * 0.3, h: tent.h * 0.4 });
     L.firePit = { x: W * 0.5, y: H * 0.5 };
     L.colliders.push({ x: L.firePit.x - 22, y: L.firePit.y - 12, w: 44, h: 22 });
-    L.chestSpot = { x: W * 0.64, y: H * 0.5 };
+    L.chestSpot = { x: W * 0.16, y: H * 0.38 }; // top-left quadrant, clear of the well/trees
     const chest = addProp(L, P['chest'], L.chestSpot.x, L.chestSpot.y, 54, { bw: 0.9, bh: 0.3 });
     L.chestZone = { x: chest.x - 24, y: chest.y - 20, w: chest.w + 48, h: chest.h + 44 };
-    addProp(L, P['sign-home'], W * 0.5, H * 0.66, P['sign-home'].height, { solid: false });
+    // sign sits beside the tent, out of the way of the player's center-screen spawn point
+    addProp(L, P['sign-home'], tent.x + tent.w + 46, tent.y + tent.h * 0.9, P['sign-home'].height, { solid: false });
     scatter(L, rng, [P['tree'], P['tree-b']], 2, 80, 110);
   } else if (def.type === 'battlefield') {
     caveWithDoor(L, P['cave-stone'], W * 0.21, H * 0.31, 185);

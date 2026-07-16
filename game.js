@@ -13,7 +13,7 @@ function getLayout(key) {
 }
 
 const muteBtn = () => ({ x: W - 64 - view.safe.r, y: H - 64 - view.safe.b, r: 30 });
-const bonkBtn = () => ({ x: W - 78 - view.safe.r, y: H - 178 - view.safe.b, r: 48 });
+const bonkBtn = () => ({ x: W - 130 - view.safe.r, y: H - 250 - view.safe.b, r: 96 });
 const homeBtn = () => ({ x: 64 + view.safe.l, y: H - 64 - view.safe.b, r: 30 });
 const startBtnRect = () => ({ x: W / 2 - 150, y: H - 165, w: 300, h: 105 });
 
@@ -245,6 +245,7 @@ function update(dt) {
       const bb = bonkBtn();
       const hb = homeBtn();
       if (Math.hypot(w.x - bb.x, w.y - bb.y) < bb.r + 12) {
+        if (navigator.vibrate) navigator.vibrate(30); // confirm the tap landed, even on cooldown
         tryBonk();
         tap = null;
       } else if (Math.hypot(w.x - hb.x, w.y - hb.y) < hb.r + 10) {
@@ -544,9 +545,10 @@ function updatePlay(dt) {
     return startFade(() => {
       game.inCave = true;
       game.caveRoom = { ...CAVE_ENTRANCE };
-      const exit = getLayout(zoneKey()).exits[0];
-      p.x = exit.rect.x + exit.rect.w / 2;
-      p.y = exit.rect.y + exit.rect.h + 30;
+      // well below the ladder trigger, near the bottom edge — so an instinctive
+      // "move up" doesn't immediately walk you straight back out
+      p.x = W / 2;
+      p.y = H - 110;
       onZoneEnter();
     });
   }
@@ -813,7 +815,8 @@ function drawMinimap() {
       for (let zx = 0; zx < 3; zx++) {
         const key = zx + ',' + zy;
         const cur = zx === game.zone.x && zy === game.zone.y;
-        ctx.fillStyle = cur ? '#ffe14d' : game.visited.has(key) ? 'rgba(180,230,140,0.9)' : 'rgba(255,255,255,0.25)';
+        // gold = key already found here; pale green = explored but not cleared yet
+        ctx.fillStyle = cur ? '#ffffff' : game.clearedZones.has(key) ? '#ffd84d' : game.visited.has(key) ? 'rgba(180,230,140,0.9)' : 'rgba(255,255,255,0.25)';
         ctx.fillRect(x0 + pad + zx * (cell + gap), y0 + pad + zy * (cell + gap), cell, cell);
       }
     }
@@ -980,17 +983,17 @@ function drawHud() {
   ctx.fillStyle = powered ? 'rgba(120,60,160,0.55)' : 'rgba(0,0,0,0.45)';
   ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = powered ? '#ffe14d' : '#fff';
-  ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r - 3, 0, Math.PI * 2); ctx.stroke();
+  ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r - 4, 0, Math.PI * 2); ctx.stroke();
   if (!powered) {
-    ctx.lineWidth = 7;
+    ctx.lineWidth = 12;
     ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r - 22, -2.2, 0.4); ctx.stroke(); // swoosh icon
+    ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r - 44, -2.2, 0.4); ctx.stroke(); // swoosh icon
   }
-  ctx.font = 'bold 17px "Courier New", monospace';
+  ctx.font = 'bold 26px "Courier New", monospace';
   ctx.textAlign = 'center';
   ctx.fillStyle = '#fff';
-  ctx.fillText(powered || 'BONK', bb.x, bb.y + bb.r - 14);
+  ctx.fillText(powered || 'BONK', bb.x, bb.y + bb.r - 28);
   ctx.restore();
   // home button (tap twice to quit to the title screen)
   const hb = homeBtn();

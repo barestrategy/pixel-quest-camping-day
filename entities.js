@@ -6,8 +6,8 @@ const ITEM_RADIUS = 26;
 const ANT_SIZE = 52;          // regular ant height in world px
 const QUEEN_SIZE = 110;
 // v3: the world is meaner — more, faster, more-alert ants (player speed is 220)
-const ANT_WANDER_SPEED = 105;
-const ANT_CHASE_SPEED = 175;  // still under the player's 220 so escape stays possible
+const ANT_WANDER_SPEED = 95;
+const ANT_CHASE_SPEED = 160;  // still under the player's 220 so escape stays possible
 const QUEEN_CHASE_SPEED = 215;
 const ANT_AGGRO = 260;
 const QUEEN_AGGRO = 320;
@@ -117,7 +117,7 @@ function applyBonkToAnt(game, events, layout, a, dx, dy, d) {
     }
   } else {
     a.bonked = { t: 0.85, vx: (dx / d) * 280, vy: (dy / d) * 280 - 60 };
-    a.respawnT = rand(6, 10);
+    a.respawnT = rand(8, 13);
     burst(game, a.x, a.y, '#fff', 8);
     events.onBonk();
     checkZoneCleared(game, layout, events);
