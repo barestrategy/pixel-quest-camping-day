@@ -159,6 +159,7 @@ function startGame(hero) {
   game.lockHintT = -99;
   game.keyGrab = null;       // active open-chest-and-lift-key celebration
   game.escaping = false;     // true after beating the Queen — race to the exit
+  game.rumbleT = 0;          // timer between falling-debris particles during the escape
   game.flashlight = false;
   game.inventoryHats = new Set(); // owned, unworn one-shot powers (party/wizard)
   game.wornHat = null;            // which inventory power BONK will fire next
@@ -372,13 +373,19 @@ const entityEvents = {
   },
   onQueenDown: () => {
     sfx.bossDown();
-    showBanner('QUEEN DEFEATED — grab your crown and RUN!');
+    showBanner('QUEEN DEFEATED — grab the guarded treasure and RUN!');
     game.shake = 0.6;
     // the Crown: King Mode (invincible + fast) powers the escape to the exit
     game.escaping = true;
     game.hat = 'crown';
     game.buffs.invuln = 999;
     game.buffs.speed = 999;
+    // a disturbed swarm pours out of the nest — harmless against King Mode, pure spectacle
+    const layout = getLayout(zoneKey());
+    for (let i = 0; i < 4; i++) {
+      const pos = randomOpenSpot(layout, 60, game.player, 140);
+      game.ants.push({ x: pos.x, y: pos.y, heading: Math.random() * Math.PI * 2, turnT: 1, queen: false });
+    }
   },
   onHurt: () => {
     game.shake = 0.3;
@@ -485,6 +492,20 @@ function updatePlay(dt) {
         x: p.x + (Math.random() - 0.5) * 60, y: p.y - 40 + (Math.random() - 0.5) * 30,
         vx: (Math.random() - 0.5) * 40, vy: -40, life: 0.5,
         color: ['#ff4fa3', '#ffd84d', '#4dd2ff', '#8aff8a'][Math.floor(Math.random() * 4)],
+      });
+    }
+  }
+
+  // the cave is coming down around you — sustained tremor + falling debris
+  if (game.escaping) {
+    game.shake = Math.max(game.shake, 0.15);
+    game.rumbleT -= dt;
+    if (game.rumbleT <= 0) {
+      game.rumbleT = 0.1;
+      game.particles.push({
+        x: Math.random() * W, y: -10,
+        vx: (Math.random() - 0.5) * 30, vy: 220 + Math.random() * 140, life: 1.2,
+        color: ['#5d5548', '#3a352e', '#241b12'][Math.floor(Math.random() * 3)],
       });
     }
   }
@@ -624,6 +645,7 @@ function draw(t) {
     drawPlay(t);
   } else if (state === 'WIN') {
     drawMenuScreen('screen-win');
+    drawWinFlourish(t);
     drawCenterText('You escaped the cave!  Treasures: ' + game.score, W / 2, H * 0.8, 26, '#053305');
     pulseText('TAP TO PLAY AGAIN', W / 2, H * 0.9, 32, t, '#053305');
   } else if (state === 'DIED') {
@@ -696,6 +718,11 @@ function drawPlay(t) {
     }
     if (game.zapFlash > 0) {
       ctx.fillStyle = 'rgba(210,230,255,' + (game.zapFlash * 1.4) + ')';
+      ctx.fillRect(-20, -20, W + 40, H + 40);
+    }
+    if (game.escaping) { // pulsing red vignette — the cave is collapsing, get out!
+      const pulse = 0.5 + Math.sin(t * 0.012) * 0.5;
+      ctx.fillStyle = 'rgba(160,20,10,' + (0.1 + pulse * 0.12) + ')';
       ctx.fillRect(-20, -20, W + 40, H + 40);
     }
     if (game.sleep) drawSleep(layout);
@@ -1069,6 +1096,19 @@ function drawMenuScreen(key) {
   const s = Math.min(W / img.naturalWidth, H / img.naturalHeight);
   const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
   ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+}
+
+// drifting confetti over the win screen — a light victory flourish, kids' art untouched underneath
+function drawWinFlourish(t) {
+  const colors = ['#ffd84d', '#8aff8a', '#4dd2ff', '#ff4fa3'];
+  for (let i = 0; i < 22; i++) {
+    const seed = i * 137.5;
+    const x = (seed * 2.3 + t * 0.02 + Math.sin(t * 0.001 + i) * 30) % W;
+    const y = (seed * 4.1 + t * 0.06) % H;
+    const s = 4 + (i % 3) * 2;
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.fillRect(x < 0 ? x + W : x, y, s, s);
+  }
 }
 
 // a cozy camp scene dressing up the title screen
