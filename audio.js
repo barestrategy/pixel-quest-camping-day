@@ -188,4 +188,15 @@ export const sfx = {
     if (!ctx) return;
     blip(120, 0.22, ctx.currentTime, 'square', 0.14, 90);
   },
+  confetti() {
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    [64, 69, 72, 76, 79, 84].forEach((n, i) => blip(NOTE(n), 0.1, t0 + i * 0.05, 'square', 0.09));
+  },
+  zap() {
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    blip(1400, 0.05, t0, 'sawtooth', 0.14, 2600);
+    blip(180, 0.16, t0 + 0.02, 'square', 0.16, 40);
+  },
 };

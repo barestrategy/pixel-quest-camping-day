@@ -1,7 +1,7 @@
 // Pixel Quest Camping Day — main loop and state machine.
 import { W, H, setWorldWidth, loadAssets } from './assets.js';
 import { input, initInput, getMove, takeTap, clearFrameFlags, drawJoystick } from './input.js';
-import { initItems, enterZone, updateEntities, drawEntities, bonkAttack, TOTAL_KEYS } from './entities.js';
+import { initItems, enterZone, updateEntities, drawEntities, bonkAttack, zapAllAnts, TOTAL_KEYS } from './entities.js';
 import { ZONE_DEFS, buildZoneLayout, snapshotLayout, moveWithCollision, blockedAt, randomOpenSpot, findOpenNear } from './zonegen.js';
 import { unlock, setTheme, sfx, toggleMute, isMuted } from './audio.js';
 
@@ -21,10 +21,14 @@ const startBtnRect = () => ({ x: W / 2 - 150, y: H - 165, w: 300, h: 105 });
 const HATS = [
   { id: 'party', name: 'Party Hat', how: 'Store 8 treasures' },
   { id: 'crown', name: 'Crown', how: 'Bonk the Queen!' },
-  { id: 'wizard', name: 'Wizard Hat', how: '3 cave treasures' },
+  { id: 'wizard', name: 'Wizard Hat', how: 'Collect 12 treasures' },
 ];
+const FLASHLIGHT_AT = 10;   // total treasures to unlock the flashlight
+const PARTY_AT = 8;         // treasures banked to earn the Party Hat
+const WIZARD_AT = 12;       // total treasures collected to earn the Wizard Hat
+const DAZZLE_TIME = 6;      // seconds the Party Hat's confetti blast dazzles ants
 const BUFF_TIME = { speed: 10, invuln: 8 };
-let shopSlots = []; // world-space tap targets, rebuilt each draw
+let invSlots = [];  // inventory strip tap targets (flashlight badge + worn/available hats)
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -94,7 +98,6 @@ const game = {
   fade: null,
   buffs: { speed: 0, invuln: 0 },
   queenDown: false,
-  shopOpen: false,
   hatsOwned: new Set(),
   hat: null,
   banner: { text: '', t: 0 },
@@ -149,12 +152,16 @@ function startGame(hero) {
   game.lockHintT = -99;
   game.keyGrab = null;       // active open-chest-and-lift-key celebration
   game.escaping = false;     // true after beating the Queen — race to the exit
+  game.flashlight = false;
+  game.inventoryHats = new Set(); // owned, unworn one-shot powers (party/wizard)
+  game.wornHat = null;            // which inventory power BONK will fire next
+  game.dazzle = 0;                // confetti-dazzle timer (party power)
+  game.zapFlash = 0;               // lightning-flash timer (wizard power)
   game.rested = false;
   game.sleep = null;
   game.homeArm = 0;
   game.buffs = { speed: 0, invuln: 0 };
   game.queenDown = false;
-  game.shopOpen = false;
   game.hearts = 6;
   game.zone = { x: 1, y: 1 };
   game.player.x = W / 2;
@@ -238,10 +245,10 @@ function update(dt) {
           game.floats.push({ x: hb.x + 90, y: hb.y - 50, text: 'Tap again to quit!', life: 2.2, color: '#fff' });
         }
         tap = null;
-      } else if (game.shopOpen) {
-        for (const slot of shopSlots) {
+      } else {
+        for (const slot of invSlots) {
           if (w.x > slot.x && w.x < slot.x + slot.w && w.y > slot.y && w.y < slot.y + slot.h) {
-            shopTap(slot.hat);
+            if (slot.hatId) wearHat(slot.hatId);
             tap = null;
             break;
           }
@@ -261,26 +268,60 @@ function tryBonk() {
   if (state !== 'PLAY' || game.transition || game.fade || p.swingCd > 0) return;
   p.swing = { t: 0.25, dir: p.dir };
   p.swingCd = 0.45;
+  if (game.wornHat === 'party') return firePartyPower();
+  if (game.wornHat === 'wizard') return fireWizardPower();
   bonkAttack(game, entityEvents, getLayout(zoneKey()));
 }
 
-function shopTap(hat) {
+function firePartyPower() {
   const p = game.player;
-  if (game.hatsOwned.has(hat.id)) {
-    game.hat = game.hat === hat.id ? null : hat.id;
+  game.dazzle = DAZZLE_TIME;
+  sfx.confetti();
+  showBanner('Confetti blast — ants dazzled!');
+  for (let i = 0; i < 30; i++) {
+    const a = Math.random() * Math.PI * 2, s = 100 + Math.random() * 260;
+    game.particles.push({
+      x: p.x, y: p.y - 20, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 120,
+      life: 0.5 + Math.random() * 0.5, color: ['#ff4fa3', '#ffd84d', '#4dd2ff', '#8aff8a'][i % 4],
+    });
+  }
+  consumeWornHat('party');
+}
+
+function fireWizardPower() {
+  zapAllAnts(game, entityEvents, getLayout(zoneKey()));
+  sfx.zap();
+  showBanner('Lightning strike!');
+  game.zapFlash = 0.35;
+  game.shake = Math.max(game.shake, 0.3);
+  consumeWornHat('wizard');
+}
+
+function consumeWornHat(id) {
+  game.inventoryHats.delete(id);
+  game.wornHat = null;
+  game.hat = null;
+}
+
+// tap an inventory badge to wear its power (BONK fires it); tap again to take it off
+function wearHat(id) {
+  if (game.wornHat === id) {
+    game.wornHat = null;
+    game.hat = null;
     sfx.pickup();
-  } else {
-    sfx.buzz();
-    game.floats.push({ x: p.x, y: p.y - 60, text: hat.how, life: 1.4, color: '#fff' });
+  } else if (game.inventoryHats.has(id)) {
+    game.wornHat = id;
+    game.hat = id;
+    sfx.pickup();
   }
 }
 
 function unlockHat(id) {
   if (game.hatsOwned.has(id)) return;
   game.hatsOwned.add(id);
-  game.hat = id; // wear it right away — kids love the instant reward
+  game.inventoryHats.add(id); // sits in the inventory until tapped to wear
   const hat = HATS.find(h => h.id === id);
-  showBanner(hat.name + ' earned!');
+  showBanner(hat.name + ' earned! Tap it to wear.');
   sfx.buff();
 }
 
@@ -423,6 +464,17 @@ function updatePlay(dt) {
   if (p.swingCd > 0) p.swingCd -= dt;
   if (game.shake > 0) game.shake -= dt;
   if (game.flash > 0) game.flash -= dt;
+  if (game.zapFlash > 0) game.zapFlash -= dt;
+  if (game.dazzle > 0) {
+    game.dazzle -= dt;
+    if (Math.random() < 0.35) { // lingering confetti sparkle while dazzled
+      game.particles.push({
+        x: p.x + (Math.random() - 0.5) * 60, y: p.y - 40 + (Math.random() - 0.5) * 30,
+        vx: (Math.random() - 0.5) * 40, vy: -40, life: 0.5,
+        color: ['#ff4fa3', '#ffd84d', '#4dd2ff', '#8aff8a'][Math.floor(Math.random() * 4)],
+      });
+    }
+  }
 
   // footstep dust
   if (p.moving) {
@@ -439,7 +491,14 @@ function updatePlay(dt) {
   updateEntities(game, dt, entityEvents, layout);
   if (state !== 'PLAY') return;
 
-  game.shopOpen = false; // the hat-shop panel is retired; powers come in Phase 2
+  // tool/power unlocks — fuel earned from treasures, not a win condition
+  if (!game.flashlight && game.score >= FLASHLIGHT_AT) {
+    game.flashlight = true;
+    showBanner('Flashlight unlocked!');
+    sfx.buff();
+  }
+  if (game.banked >= PARTY_AT) unlockHat('party');
+  if (game.score >= WIZARD_AT) unlockHat('wizard');
 
   if (game.caveUnlockT > 0) game.caveUnlockT -= dt;
 
@@ -601,17 +660,21 @@ function drawPlay(t) {
     drawEntities(ctx, assets, game, t, layout, () => drawPlayer(t));
     if (!game.inCave && !game.caveUnlocked && layout.caveMouth) drawCaveGate(layout.caveMouth);
     if (game.keyGrab && !game.inCave) drawKeyLift();
-    if (game.shopOpen) drawShop(layout);
-    if (game.inCave) { // lantern-light darkness around the hero
+    if (game.inCave) { // near-black without the flashlight; a wide warm pool once it's unlocked
       const p = game.player;
-      const g = ctx.createRadialGradient(p.x, p.y, 130, p.x, p.y, 420);
+      const [inner, outer] = game.flashlight ? [130, 420] : [45, 150];
+      const g = ctx.createRadialGradient(p.x, p.y, inner, p.x, p.y, outer);
       g.addColorStop(0, 'rgba(0,0,0,0)');
-      g.addColorStop(1, 'rgba(8,5,2,0.82)');
+      g.addColorStop(1, 'rgba(8,5,2,0.88)');
       ctx.fillStyle = g;
       ctx.fillRect(-20, -20, W + 40, H + 40);
     }
     if (game.flash > 0) {
       ctx.fillStyle = 'rgba(232,48,42,' + (game.flash * 1.2) + ')';
+      ctx.fillRect(-20, -20, W + 40, H + 40);
+    }
+    if (game.zapFlash > 0) {
+      ctx.fillStyle = 'rgba(210,230,255,' + (game.zapFlash * 1.4) + ')';
       ctx.fillRect(-20, -20, W + 40, H + 40);
     }
     if (game.sleep) drawSleep(layout);
@@ -811,38 +874,55 @@ function drawSleep(layout) {
   }
 }
 
-function drawShop(layout) {
-  shopSlots = [];
-  const cs = layout.chestSpot;
-  const pw = 3 * 148 + 2 * 12 + 28, ph = 176;
-  const x0 = Math.max(12, Math.min(W - pw - 12, cs.x - pw / 2));
-  const y0 = Math.max(84, cs.y - 80 - ph);
-  ctx.fillStyle = 'rgba(10,20,8,0.85)';
-  ctx.fillRect(x0, y0, pw, ph);
-  ctx.strokeStyle = '#ffd84d';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(x0, y0, pw, ph);
-  drawCenterText('HATS — treasures stored: ' + game.banked, x0 + pw / 2, y0 + 28, 22, '#ffd84d');
-  HATS.forEach((hat, i) => {
-    const sx = x0 + 14 + i * 160, sy = y0 + 42, sw = 148, sh = 122;
-    const owned = game.hatsOwned.has(hat.id);
-    ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.fillRect(sx, sy, sw, sh);
-    if (game.hat === hat.id) {
-      ctx.strokeStyle = '#8aff8a';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(sx, sy, sw, sh);
-    }
+// bottom-center strip: flashlight badge + any earned, unspent hat powers.
+// Tap a hat badge to wear it (BONK then fires its power once); tap again to take it off.
+function drawInventory() {
+  invSlots = [];
+  const slotW = 52, gap = 10;
+  const powerHats = HATS.filter(h => h.id !== 'crown' && game.inventoryHats.has(h.id));
+  const n = 1 + powerHats.length; // flashlight badge always shown
+  const totalW = n * slotW + (n - 1) * gap;
+  const x0 = W / 2 - totalW / 2, y0 = H - 78;
+
+  // flashlight badge (not tappable — auto-on in the cave once unlocked)
+  drawBadgeBg(x0, y0, slotW, false);
+  ctx.save();
+  if (!game.flashlight) ctx.globalAlpha = 0.3;
+  drawFlashlightIcon(x0 + slotW / 2, y0 + slotW / 2);
+  ctx.restore();
+  invSlots.push({ x: x0, y: y0, w: slotW, h: slotW, hatId: null });
+
+  powerHats.forEach((hat, i) => {
+    const sx = x0 + (i + 1) * (slotW + gap);
+    const worn = game.wornHat === hat.id;
+    drawBadgeBg(sx, y0, slotW, worn);
     const img = assets.props['hat-' + hat.id];
-    ctx.save();
-    if (!owned) ctx.globalAlpha = 0.28; // locked: shadowy badge
-    ctx.drawImage(img, sx + sw / 2 - 33, sy + 8, 66, 48);
-    ctx.restore();
-    drawCenterText(owned ? hat.name : '? ? ?', sx + sw / 2, sy + 80, 19, '#fff');
-    const label = game.hat === hat.id ? 'Equipped!' : owned ? 'Tap to wear' : hat.how;
-    drawCenterText(label, sx + sw / 2, sy + 104, 13, owned ? '#8aff8a' : '#ffd84d');
-    shopSlots.push({ x: sx, y: sy, w: sw, h: sh, hat });
+    ctx.drawImage(img, sx + slotW / 2 - 22, y0 + 10, 44, 44 * (img.height / img.width));
+    invSlots.push({ x: sx, y: y0, w: slotW, h: slotW, hatId: hat.id });
   });
+}
+
+function drawBadgeBg(x, y, s, active) {
+  ctx.fillStyle = active ? 'rgba(138,255,138,0.35)' : 'rgba(0,0,0,0.45)';
+  ctx.fillRect(x, y, s, s);
+  ctx.strokeStyle = active ? '#8aff8a' : 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = active ? 3 : 2;
+  ctx.strokeRect(x, y, s, s);
+}
+
+function drawFlashlightIcon(cx, cy) {
+  ctx.fillStyle = '#ffe9a8';
+  ctx.fillRect(cx - 6, cy - 12, 12, 16);
+  ctx.fillStyle = '#8a8a8a';
+  ctx.fillRect(cx - 8, cy + 4, 16, 10);
+  ctx.fillStyle = '#5a5a5a';
+  ctx.fillRect(cx - 5, cy + 14, 10, 6);
+  if (game.flashlight) {
+    ctx.fillStyle = 'rgba(255,233,168,0.5)';
+    ctx.beginPath();
+    ctx.moveTo(cx - 5, cy - 12); ctx.lineTo(cx - 16, cy - 26); ctx.lineTo(cx + 16, cy - 26); ctx.lineTo(cx + 5, cy - 12);
+    ctx.closePath(); ctx.fill();
+  }
 }
 
 function drawHud() {
@@ -865,22 +945,25 @@ function drawHud() {
       bx += 40;
     }
   }
-  // bonk button
+  // bonk button — relabels while a hat power is worn and ready to fire
   const bb = bonkBtn();
+  const powered = game.wornHat === 'party' ? 'PARTY!' : game.wornHat === 'wizard' ? 'ZAP!' : null;
   ctx.save();
   ctx.globalAlpha = game.player.swingCd > 0 ? 0.45 : 0.85;
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillStyle = powered ? 'rgba(120,60,160,0.55)' : 'rgba(0,0,0,0.45)';
   ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = '#fff';
+  ctx.strokeStyle = powered ? '#ffe14d' : '#fff';
   ctx.lineWidth = 4;
   ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r - 3, 0, Math.PI * 2); ctx.stroke();
-  ctx.lineWidth = 7;
-  ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r - 22, -2.2, 0.4); ctx.stroke(); // swoosh icon
+  if (!powered) {
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r - 22, -2.2, 0.4); ctx.stroke(); // swoosh icon
+  }
   ctx.font = 'bold 17px "Courier New", monospace';
   ctx.textAlign = 'center';
   ctx.fillStyle = '#fff';
-  ctx.fillText('BONK', bb.x, bb.y + bb.r - 14);
+  ctx.fillText(powered || 'BONK', bb.x, bb.y + bb.r - 14);
   ctx.restore();
   // home button (tap twice to quit to the title screen)
   const hb = homeBtn();
@@ -927,6 +1010,7 @@ function drawHud() {
   }
   drawMinimap();
   drawQuest();
+  drawInventory();
 }
 
 // one-line "what to do next" tracker under the minimap

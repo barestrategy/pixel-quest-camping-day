@@ -88,6 +88,37 @@ function checkZoneCleared(game, layout, events) {
 // The hero swings in their facing direction; nearby ants get bonked.
 const DIRV = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
 
+function applyBonkToAnt(game, events, layout, a, dx, dy, d) {
+  if (a.queen) {
+    a.hp--;
+    a.hurtFlash = 0.45;
+    a.state = 'cooldown'; a.stateT = 1.2;
+    moveWithCollision(a, (dx / d) * 46, (dy / d) * 46, layout, QUEEN_SIZE * 0.3);
+    if (a.hp <= 0) {
+      a.gone = true;
+      a.respawnT = Infinity;
+      game.queenDown = true;
+      for (let i = 0; i < 5; i++) { // gem shower!
+        game.drops.push({
+          x: a.x, y: a.y, vx: rand(-240, 240), vy: rand(-340, -160),
+          type: 'gem', age: 0, settled: false,
+        });
+      }
+      burst(game, a.x, a.y, '#ffd94d', 22);
+      events.onQueenDown();
+    } else {
+      burst(game, a.x, a.y, '#e8302a', 8);
+      events.onQueenHit();
+    }
+  } else {
+    a.bonked = { t: 0.85, vx: (dx / d) * 280, vy: (dy / d) * 280 - 60 };
+    a.respawnT = rand(6, 10);
+    burst(game, a.x, a.y, '#fff', 8);
+    events.onBonk();
+    checkZoneCleared(game, layout, events);
+  }
+}
+
 export function bonkAttack(game, events, layout) {
   const p = game.player;
   const dv = DIRV[p.dir];
@@ -96,34 +127,18 @@ export function bonkAttack(game, events, layout) {
     const dx = a.x - p.x, dy = a.y - p.y;
     const d = Math.hypot(dx, dy) || 1;
     if (d > 100 || (dx * dv.x + dy * dv.y) / d < -0.25) continue;
-    if (a.queen) {
-      a.hp--;
-      a.hurtFlash = 0.45;
-      a.state = 'cooldown'; a.stateT = 1.2;
-      moveWithCollision(a, (dx / d) * 46, (dy / d) * 46, layout, QUEEN_SIZE * 0.3);
-      if (a.hp <= 0) {
-        a.gone = true;
-        a.respawnT = Infinity;
-        game.queenDown = true;
-        for (let i = 0; i < 5; i++) { // gem shower!
-          game.drops.push({
-            x: a.x, y: a.y, vx: rand(-240, 240), vy: rand(-340, -160),
-            type: 'gem', age: 0, settled: false,
-          });
-        }
-        burst(game, a.x, a.y, '#ffd94d', 22);
-        events.onQueenDown();
-      } else {
-        burst(game, a.x, a.y, '#e8302a', 8);
-        events.onQueenHit();
-      }
-    } else {
-      a.bonked = { t: 0.85, vx: (dx / d) * 280, vy: (dy / d) * 280 - 60 };
-      a.respawnT = rand(6, 10);
-      burst(game, a.x, a.y, '#fff', 8);
-      events.onBonk();
-      checkZoneCleared(game, layout, events);
-    }
+    applyBonkToAnt(game, events, layout, a, dx, dy, d);
+  }
+}
+
+// Wizard-hat power: every active ant in the zone takes a bonk at once, regardless of range/facing.
+export function zapAllAnts(game, events, layout) {
+  const p = game.player;
+  for (const a of game.ants) {
+    if (a.gone || a.bonked) continue;
+    const dx = a.x - p.x, dy = a.y - p.y;
+    const d = Math.hypot(dx, dy) || 1;
+    applyBonkToAnt(game, events, layout, a, dx, dy, d);
   }
 }
 
@@ -231,6 +246,7 @@ export function updateEntities(game, dt, events, layout) {
 
   // ants
   const invuln = game.buffs && game.buffs.invuln > 0;
+  const dazzled = game.dazzle > 0; // party-hat power: every ant wanders harmlessly for a bit
   for (const a of game.ants) {
     // bonked: spin away, then wait to respawn at a new spot
     if (a.bonked) {
@@ -269,7 +285,14 @@ export function updateEntities(game, dt, events, layout) {
     let speed = ANT_WANDER_SPEED;
     if (a.hurtFlash > 0) a.hurtFlash -= dt;
 
-    if (a.queen) {
+    if (dazzled) {
+      // confetti-dazed: aimless wandering, no aggro, can't bite
+      speed = a.queen ? 95 : ANT_WANDER_SPEED;
+      a.turnT -= dt;
+      if (a.turnT <= 0) { a.heading = rand(0, Math.PI * 2); a.turnT = rand(0.6, 2); }
+      a.chasing = false;
+      if (a.queen) { a.state = 'wander'; a.stateT = 0.5; }
+    } else if (a.queen) {
       // boss brain: wander -> telegraph ('!!') -> charge -> cooldown
       a.stateT -= dt;
       if (a.state === 'telegraph') {
@@ -322,7 +345,7 @@ export function updateEntities(game, dt, events, layout) {
     a.y = Math.max(r, Math.min(H - r, a.y));
 
     // contact damage — both bounce apart, and this ant backs off for 2s
-    if (!invuln && p.hurtT <= 0 && (!a.hitCd || a.hitCd <= 0) && dist < size / 2 + 22) {
+    if (!invuln && !dazzled && p.hurtT <= 0 && (!a.hitCd || a.hitCd <= 0) && dist < size / 2 + 22) {
       game.hearts--;
       p.hurtT = 1;
       a.hitCd = 2;
